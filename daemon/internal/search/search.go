@@ -35,12 +35,17 @@ type Multi struct {
 	Client  *http.Client
 }
 
-// NewDefault returns a Multi configured with the SearXNG-only engine
-// (the only deterministic-API engine). Callers can append DDG/Brave HTML
-// scrapers as needed.
+// NewDefault returns a Multi configured with SearXNG (if a non-empty URL is
+// passed) plus DuckDuckGo as a zero-dependency HTML fallback. RRF fuses
+// results across whichever engines are registered. Callers can append more
+// engines (Brave HTML, Bing, etc.) by mutating .Engines.
 func NewDefault(searxngURL string) *Multi {
+	engines := []Engine{NewDuckDuckGo()}
+	if searxngURL != "" {
+		engines = append([]Engine{&SearXNG{Endpoint: searxngURL, Client: &http.Client{Timeout: 15 * time.Second}}}, engines...)
+	}
 	return &Multi{
-		Engines: []Engine{&SearXNG{Endpoint: searxngURL, Client: &http.Client{Timeout: 15 * time.Second}}},
+		Engines: engines,
 		Client:  &http.Client{Timeout: 15 * time.Second},
 	}
 }
