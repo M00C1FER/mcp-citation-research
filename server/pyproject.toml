@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "citation-research"
 version = "0.1.0"
 description = "MCP server with confidence-gated synthesis + BM25 citation injection. Pairs with the citation-researchd Go daemon for I/O-bound operations."
-readme = "../README.md"
+readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = []
