@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.coverage
+.venv/
+
+# Go
+/daemon/citation-researchd
+/daemon/coverage.out
+/bin/
+
+# Editor
+.idea/
+.vscode/

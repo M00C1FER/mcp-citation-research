@@ -1,0 +1,58 @@
+"""Thin HTTP client for the citation-researchd Go daemon."""
+from __future__ import annotations
+
+import os
+from typing import Any, Dict, List
+
+import requests
+
+
+class DaemonClient:
+    """Client for citation-researchd HTTP API.
+
+    The daemon owns search/fetch/session-state. The Python frontend owns
+    synthesis (LLM-bound) and verify/cite (BM25). Networking → Go,
+    LLM-orchestration → Python.
+    """
+
+    def __init__(self, base_url: str | None = None, timeout: int = 60):
+        self.base_url = (base_url or os.environ.get("CITATION_RESEARCHD_URL", "http://127.0.0.1:8090")).rstrip("/")
+        self.timeout = timeout
+        self._session = requests.Session()
+
+    def healthz(self) -> Dict[str, Any]:
+        return self._get("/healthz")
+
+    def search(self, queries: List[str], max_per_query: int = 50, k: int = 60) -> Dict[str, Any]:
+        return self._post("/search", {"queries": queries, "max": max_per_query, "k": k})
+
+    def fetch(self, urls: List[str], max_concurrent: int = 16, timeout_s: int = 30) -> Dict[str, Any]:
+        return self._post("/fetch", {"urls": urls, "max_concurrent": max_concurrent, "timeout_s": timeout_s})
+
+    def session_open(self, topic: str, depth: str = "exhaustive") -> Dict[str, Any]:
+        return self._post("/session/open", {"topic": topic, "depth": depth})
+
+    def session_update(self, session_id: str, iteration: int,
+                       considered: List[str], fetched: List[str]) -> Dict[str, Any]:
+        return self._post("/session/update", {
+            "session_id": session_id,
+            "iteration": iteration,
+            "considered": considered,
+            "fetched": fetched,
+        })
+
+    def session_status(self, session_id: str) -> Dict[str, Any]:
+        return self._get(f"/session/status?session_id={session_id}")
+
+    def session_close(self, session_id: str) -> Dict[str, Any]:
+        return self._post("/session/close", {"session_id": session_id})
+
+    def _get(self, path: str) -> Dict[str, Any]:
+        r = self._session.get(self.base_url + path, timeout=self.timeout)
+        r.raise_for_status()
+        return r.json()
+
+    def _post(self, path: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        r = self._session.post(self.base_url + path, json=body, timeout=self.timeout)
+        r.raise_for_status()
+        return r.json()
