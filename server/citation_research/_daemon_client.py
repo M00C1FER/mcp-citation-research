@@ -33,11 +33,22 @@ class DaemonClient:
     def search(self, queries: List[str], max_per_query: int = 50, k: int = 60) -> Dict[str, Any]:
         return self._post("/search", {"queries": queries, "max": max_per_query, "k": k})
 
+    # Per-call upper bound on timeout_s — defends against a misbehaving
+    # caller passing 1e9 and stalling the connection forever.
+    _MAX_FETCH_TIMEOUT_S = 600  # 10 min
+
     def fetch(self, urls: List[str], max_concurrent: int = 16, timeout_s: int = 30) -> Dict[str, Any]:
         # Override the client's default transport timeout when the per-call
         # work is expected to exceed it: the daemon may take ~timeout_s plus
         # network/processing overhead. Otherwise large fetch batches raise
         # ReadTimeout in the client while the daemon is still working.
+        if timeout_s <= 0:
+            raise ValueError(f"timeout_s must be positive, got {timeout_s}")
+        if timeout_s > self._MAX_FETCH_TIMEOUT_S:
+            raise ValueError(
+                f"timeout_s={timeout_s}s exceeds client cap "
+                f"{self._MAX_FETCH_TIMEOUT_S}s"
+            )
         return self._post(
             "/fetch",
             {"urls": urls, "max_concurrent": max_concurrent, "timeout_s": timeout_s},
