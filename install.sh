@@ -87,7 +87,10 @@ main() {
     else
         git clone -q https://github.com/M00C1FER/mcp-citation-research.git "$INSTALL_HOME"
     fi
-    ( cd "$INSTALL_HOME/daemon" && go build -o "$DAEMON_BIN" ./cmd/citation-researchd )
+    # CGO_ENABLED=0 yields a fully static binary that runs on any glibc/musl
+    # distro (matters for users running on Alpine or shipping the daemon
+    # via Docker).
+    ( cd "$INSTALL_HOME/daemon" && CGO_ENABLED=0 go build -o "$DAEMON_BIN" ./cmd/citation-researchd )
     ok "daemon built → $DAEMON_BIN"
 
     ( cd "$INSTALL_HOME/server" && python3 -m venv .venv && \

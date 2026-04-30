@@ -64,3 +64,40 @@ func TestAuthMiddleware_NoTokenDisablesAuth(t *testing.T) {
 		t.Fatalf("no token configured = open mode: want 200, got %d", w.Code)
 	}
 }
+
+func TestAuthMiddleware_RejectsBasicAuth(t *testing.T) {
+	// "Basic ..." header is not Bearer; must reject even if it happens to
+	// contain the token literally.
+	mw := authMiddleware("secret", okHandler())
+	r := httptest.NewRequest("POST", "/search", nil)
+	r.Header.Set("Authorization", "Basic secret")
+	w := httptest.NewRecorder()
+	mw.ServeHTTP(w, r)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("Basic-auth header: want 401, got %d", w.Code)
+	}
+}
+
+func TestAuthMiddleware_RejectsEmptyBearer(t *testing.T) {
+	// "Bearer " with empty value must reject.
+	mw := authMiddleware("secret", okHandler())
+	r := httptest.NewRequest("POST", "/search", nil)
+	r.Header.Set("Authorization", "Bearer ")
+	w := httptest.NewRecorder()
+	mw.ServeHTTP(w, r)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("empty bearer: want 401, got %d", w.Code)
+	}
+}
+
+func TestAuthMiddleware_RejectsTokenWithExtraSuffix(t *testing.T) {
+	// Constant-time compare must reject "Bearer secret-extra" against "Bearer secret".
+	mw := authMiddleware("secret", okHandler())
+	r := httptest.NewRequest("POST", "/search", nil)
+	r.Header.Set("Authorization", "Bearer secret-extra")
+	w := httptest.NewRecorder()
+	mw.ServeHTTP(w, r)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("extra-suffix: want 401, got %d", w.Code)
+	}
+}
