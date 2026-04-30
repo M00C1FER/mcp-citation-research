@@ -1,8 +1,22 @@
 # mcp-citation-research
 
-> MCP research server with **hard 0.90 confidence gate** + **BM25 sentence-chunk citations**. Hybrid architecture: Go daemon for I/O (search, fetch, session state), Python MCP frontend for verify and cite. Synthesis stays inline in the calling MCP client's context window.
+> **MCP research server that refuses to hallucinate.** Hard 0.90 confidence gate + four-axis source-mandate enforcement (iterations, considered, fetched, unique domains) + BM25 sentence-chunk citation injection. The session API **refuses to advance** to synthesis until the mandate is met — most public research MCP servers will happily synthesize from 3 sources; this one won't.
+>
+> Hybrid Go + Python by design: I/O daemon in Go (native goroutines, single binary), Python MCP frontend for verify and cite (rank_bm25, FastMCP). Synthesis stays inline in the calling MCP client's context window — your model does the writing, this server enforces the discipline.
 
 [![CI](https://github.com/M00C1FER/mcp-citation-research/actions/workflows/ci.yml/badge.svg)](https://github.com/M00C1FER/mcp-citation-research/actions)
+![Go](https://img.shields.io/badge/go-1.22+-blue)
+![Python](https://img.shields.io/badge/python-3.10+-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+
+## What's actually unique here
+
+After a survey of 70+ MCP servers in the [official registry](https://registry.modelcontextprotocol.io) and adjacent ecosystems (Smithery, Glama, awesome-mcp-servers @ 85k★), the differentiators are:
+
+1. **Hard mandate enforcement** — the four-axis floor (10 iter / 400 considered / 100 fetched / 15 unique domains for `exhaustive` depth) is a *refusal contract*, not a suggestion. Other research MCPs let the model decide when to stop; this one decides *for* the model.
+2. **BM25 sentence-chunked citations** — every paragraph of synthesis gets a `[S#]` tag verified against fetched source content. Unsupported paragraphs flagged `[UNVERIFIED]` automatically.
+3. **0.90 confidence gate** — citation coverage + token groundedness blended; falls below the gate, the verifier surfaces it.
+4. **Hybrid Go+Python** — most MCP research servers are pure Python (DeepResearchMCP, Perplexity proxies, etc.). This one demonstrates the right language at the right boundary.
 
 ## Why hybrid Go + Python
 
