@@ -34,7 +34,15 @@ class DaemonClient:
         return self._post("/search", {"queries": queries, "max": max_per_query, "k": k})
 
     def fetch(self, urls: List[str], max_concurrent: int = 16, timeout_s: int = 30) -> Dict[str, Any]:
-        return self._post("/fetch", {"urls": urls, "max_concurrent": max_concurrent, "timeout_s": timeout_s})
+        # Override the client's default transport timeout when the per-call
+        # work is expected to exceed it: the daemon may take ~timeout_s plus
+        # network/processing overhead. Otherwise large fetch batches raise
+        # ReadTimeout in the client while the daemon is still working.
+        return self._post(
+            "/fetch",
+            {"urls": urls, "max_concurrent": max_concurrent, "timeout_s": timeout_s},
+            request_timeout=max(self.timeout, timeout_s + 10),
+        )
 
     def session_open(self, topic: str, depth: str = "exhaustive") -> Dict[str, Any]:
         return self._post("/session/open", {"topic": topic, "depth": depth})
@@ -59,7 +67,11 @@ class DaemonClient:
         r.raise_for_status()
         return r.json()
 
-    def _post(self, path: str, body: Dict[str, Any]) -> Dict[str, Any]:
-        r = self._session.post(self.base_url + path, json=body, timeout=self.timeout)
+    def _post(self, path: str, body: Dict[str, Any],
+              request_timeout: int | None = None) -> Dict[str, Any]:
+        r = self._session.post(
+            self.base_url + path, json=body,
+            timeout=request_timeout or self.timeout,
+        )
         r.raise_for_status()
         return r.json()
