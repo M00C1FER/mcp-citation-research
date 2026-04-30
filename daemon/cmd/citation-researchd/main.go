@@ -22,7 +22,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/M00C1FER/mcp-citation-research/daemon/internal/fetch"
@@ -232,9 +234,20 @@ func main() {
 		}
 	}()
 
-	// Block until SIGINT/SIGTERM (handled by Go's default signal forwarding).
-	<-context.Background().Done()
-	_ = httpSrv.Close()
+	// Block until SIGINT/SIGTERM, then trigger graceful shutdown.
+	// The previous `<-context.Background().Done()` was a no-op: the channel
+	// returned by Background().Done() never fires, so the process hung
+	// forever waiting and the Close() below was unreachable.
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	sig := <-sigs
+	log.Printf("received %s, shutting down", sig)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("graceful shutdown error: %v", err)
+		_ = httpSrv.Close()
+	}
 }
 
 func envOr(key, fallback string) string {

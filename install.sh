@@ -111,10 +111,13 @@ EOF
     mkdir -p "$CONF_DIR"
     if [ ! -s "$TOKEN_FILE" ]; then
         # 32-byte URL-safe token; openssl is universal, fallback to /dev/urandom.
+        # 32 bytes of entropy in both branches — the openssl/urandom split
+        # was previously inconsistent (24 vs 32) and yielded different
+        # token strengths depending on which binary the host had.
         if command -v openssl >/dev/null 2>&1; then
             openssl rand -base64 32 | tr '+/' '-_' | tr -d '=' > "$TOKEN_FILE"
         else
-            head -c 24 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=' > "$TOKEN_FILE"
+            head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=' > "$TOKEN_FILE"
         fi
         chmod 600 "$TOKEN_FILE"
         ok "generated daemon auth token → $TOKEN_FILE"
