@@ -101,22 +101,62 @@ EOF
     chmod +x "$BIN/citation-research-mcp"
     ok "MCP frontend installed → $BIN/citation-research-mcp"
 
-    # Optional: write a launcher that boots the daemon with the chosen backend.
+    # Pre-shared bearer token: shared between daemon and MCP frontend.
+    # Generated once at install; both halves read CITATION_RESEARCHD_TOKEN at runtime.
+    local CONF_DIR="$INSTALL_HOME/config"
+    local TOKEN_FILE="$CONF_DIR/daemon.token"
+    mkdir -p "$CONF_DIR"
+    if [ ! -s "$TOKEN_FILE" ]; then
+        # 32-byte URL-safe token; openssl is universal, fallback to /dev/urandom.
+        if command -v openssl >/dev/null 2>&1; then
+            openssl rand -base64 32 | tr '+/' '-_' | tr -d '=' > "$TOKEN_FILE"
+        else
+            head -c 24 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=' > "$TOKEN_FILE"
+        fi
+        chmod 600 "$TOKEN_FILE"
+        ok "generated daemon auth token → $TOKEN_FILE"
+    else
+        ok "reusing existing daemon auth token"
+    fi
+
+    # Launcher: boots the daemon with the chosen backend AND the bearer token.
     cat > "$BIN/citation-researchd-start" <<EOF
 #!/usr/bin/env bash
 # Boots citation-researchd with the install-wizard's chosen search backend.
+# Token sourced from \$CITATION_RESEARCHD_TOKEN (env override) or token file.
+TOKEN="\${CITATION_RESEARCHD_TOKEN:-\$(cat "$TOKEN_FILE" 2>/dev/null || echo '')}"
+export CITATION_RESEARCHD_TOKEN="\$TOKEN"
 exec "$DAEMON_BIN" -addr 127.0.0.1:8090 -searxng "${SEARXNG_URL}" "\$@"
 EOF
     chmod +x "$BIN/citation-researchd-start"
 
+    # Update MCP-frontend launcher to source the same token so the Python client
+    # sends the matching Authorization header.
+    cat > "$BIN/citation-research-mcp" <<EOF
+#!/usr/bin/env bash
+TOKEN="\${CITATION_RESEARCHD_TOKEN:-\$(cat "$TOKEN_FILE" 2>/dev/null || echo '')}"
+export CITATION_RESEARCHD_TOKEN="\$TOKEN"
+exec "$INSTALL_HOME/server/.venv/bin/citation-research-mcp" "\$@"
+EOF
+    chmod +x "$BIN/citation-research-mcp"
+
     say ""; say "Step 5/5: Verify"
-    if "$DAEMON_BIN" -addr "127.0.0.1:18091" -searxng "$SEARXNG_URL" >/tmp/cr.log 2>&1 & then
+    local TEST_TOKEN; TEST_TOKEN="$(cat "$TOKEN_FILE" 2>/dev/null || echo '')"
+    if CITATION_RESEARCHD_TOKEN="$TEST_TOKEN" "$DAEMON_BIN" -addr "127.0.0.1:18091" -searxng "$SEARXNG_URL" >/tmp/cr.log 2>&1 & then
         local PID=$!; sleep 1
+        # /healthz is exempt from auth; should always succeed
         if curl -fsS http://127.0.0.1:18091/healthz >/dev/null 2>&1; then ok "daemon healthcheck OK"; else warn "daemon healthcheck failed (see /tmp/cr.log)"; fi
+        # /search must reject without the token
+        if curl -fsS -X POST http://127.0.0.1:18091/search -d '{}' >/dev/null 2>&1; then
+            warn "auth check failed: /search accepted unauthenticated request"
+        else
+            ok "auth check OK: /search rejects unauthenticated requests"
+        fi
         kill "$PID" 2>/dev/null || true
     fi
     say ""
     ok "Done. Start the daemon with: citation-researchd-start &"
     info "Then wire the MCP server into your client (e.g. Claude Desktop config)."
+    info "Token (shared by daemon + MCP frontend): $TOKEN_FILE"
 }
 main "$@"

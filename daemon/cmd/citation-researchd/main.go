@@ -16,17 +16,44 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"flag"
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/M00C1FER/mcp-citation-research/daemon/internal/fetch"
 	"github.com/M00C1FER/mcp-citation-research/daemon/internal/search"
 	"github.com/M00C1FER/mcp-citation-research/daemon/internal/session"
 )
+
+// authMiddleware enforces a pre-shared bearer token on every protected
+// endpoint. /healthz is exempt (operational liveness probes shouldn't need
+// the secret). When token == "" the middleware logs once and disables
+// auth — preserving the dev-friendly default while making the safer
+// behavior the easy choice (set CITATION_RESEARCHD_TOKEN).
+func authMiddleware(token string, next http.Handler) http.Handler {
+	if token == "" {
+		log.Printf("WARN: CITATION_RESEARCHD_TOKEN unset; daemon accepts unauthenticated requests on the loopback interface")
+		return next
+	}
+	expected := []byte("Bearer " + token)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		got := r.Header.Get("Authorization")
+		if !strings.HasPrefix(got, "Bearer ") || subtle.ConstantTimeCompare([]byte(got), expected) != 1 {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
 
 type server struct {
 	sessions *session.Manager
@@ -164,6 +191,8 @@ func main() {
 	searxngURL := flag.String("searxng", envOr("SEARXNG_URL", "http://127.0.0.1:8080"), "SearXNG endpoint")
 	flag.Parse()
 
+	token := os.Getenv("CITATION_RESEARCHD_TOKEN")
+
 	srv := &server{
 		sessions: session.NewManager(),
 		search:   search.NewDefault(*searxngURL),
@@ -181,10 +210,14 @@ func main() {
 
 	httpSrv := &http.Server{
 		Addr:              *addr,
-		Handler:           mux,
+		Handler:           authMiddleware(token, mux),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
-	log.Printf("citation-researchd listening on %s (searxng=%s)", *addr, *searxngURL)
+	authMode := "with bearer-token auth"
+	if token == "" {
+		authMode = "WITHOUT auth (loopback only — set CITATION_RESEARCHD_TOKEN to harden)"
+	}
+	log.Printf("citation-researchd listening on %s %s (searxng=%s)", *addr, authMode, *searxngURL)
 	go func() {
 		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatal(err)

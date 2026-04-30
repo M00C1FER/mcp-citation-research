@@ -15,10 +15,17 @@ class DaemonClient:
     LLM-orchestration → Python.
     """
 
-    def __init__(self, base_url: str | None = None, timeout: int = 60):
+    def __init__(self, base_url: str | None = None, timeout: int = 60,
+                 token: str | None = None):
         self.base_url = (base_url or os.environ.get("CITATION_RESEARCHD_URL", "http://127.0.0.1:8090")).rstrip("/")
         self.timeout = timeout
         self._session = requests.Session()
+        # Pre-shared key auth — daemon enforces if it has CITATION_RESEARCHD_TOKEN set.
+        # Client sends the header unconditionally when the token is available;
+        # daemon ignores it in unauthenticated mode (no env), so no harm done.
+        token = token or os.environ.get("CITATION_RESEARCHD_TOKEN", "")
+        if token:
+            self._session.headers["Authorization"] = f"Bearer {token}"
 
     def healthz(self) -> Dict[str, Any]:
         return self._get("/healthz")
