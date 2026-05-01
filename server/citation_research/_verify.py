@@ -12,9 +12,28 @@ from typing import Any, Dict, List
 
 _DEFAULT_GATE = 0.90
 
+# Common English stop words excluded from the groundedness token comparison to
+# prevent high-frequency function words from inflating the overlap score (fix #8).
+_STOP_WORDS = frozenset({
+    "an", "the", "and", "or", "but", "in", "on", "at", "to", "for",
+    "of", "with", "by", "from", "as", "is", "was", "are", "were", "be",
+    "been", "being", "have", "has", "had", "do", "does", "did", "will",
+    "would", "could", "should", "may", "might", "shall", "can", "that",
+    "this", "these", "those", "it", "its", "they", "them", "their", "we",
+    "us", "our", "you", "your", "he", "him", "his", "she", "her", "not",
+    "no", "so", "if", "out", "up", "about", "into", "than", "then", "now",
+    "just", "also", "after", "over", "back", "what", "how", "who", "when",
+    "which", "my", "one", "all", "only", "some", "any", "most", "me",
+    "get", "go", "make", "time", "well", "good", "new", "work", "use",
+    "way", "two", "come", "like", "give", "day", "want", "look", "know",
+    "say", "see", "take", "even", "first", "because", "there", "people",
+    "year", "same", "other", "more", "such", "since",
+})
+
 
 def _tokenize(text: str) -> List[str]:
-    return re.findall(r"\b[a-zA-Z][a-zA-Z0-9_-]+\b", text.lower())
+    tokens = re.findall(r"\b[a-zA-Z][a-zA-Z0-9_-]+\b", text.lower())
+    return [t for t in tokens if t not in _STOP_WORDS]
 
 
 def _split_paragraphs(text: str) -> List[str]:
