@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from typing import Any, Dict, List
 
 try:
@@ -29,6 +30,27 @@ from . import DaemonClient, bm25_cite, verify_synthesis
 
 mcp = FastMCP("citation-research")
 _client = DaemonClient()
+
+# Hard confidence gate — not caller-configurable to prevent bypass.
+# Override at deployment time via CITATION_RESEARCH_GATE env variable.
+_HARD_GATE = float(os.environ.get("CITATION_RESEARCH_GATE", "0.90"))
+
+
+def _parse_sources(sources_json: str | None) -> List[Dict[str, Any]]:
+    """Safely parse a JSON sources list.
+
+    Returns an empty list on None, empty string, non-list JSON, or invalid JSON,
+    so callers never receive None or a TypeError downstream.
+    """
+    if not sources_json:
+        return []
+    try:
+        result = json.loads(sources_json)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(result, list):
+        return []
+    return result
 
 
 @mcp.tool()
@@ -99,17 +121,22 @@ def research_decompose(topic: str, breadth: int = 8) -> str:
 
 
 @mcp.tool()
-def research_verify(synthesis: str, sources_json: str, gate: float = 0.90) -> str:
-    """Verify synthesis against sources. Returns confidence + gate result."""
-    sources: List[Dict[str, Any]] = json.loads(sources_json) if sources_json else []
-    return json.dumps(verify_synthesis(synthesis, sources, gate))
+def research_verify(synthesis: str, sources_json: str) -> str:
+    """Verify synthesis against sources. Returns confidence + gate result.
+
+    The confidence gate threshold is set at deployment time via the
+    CITATION_RESEARCH_GATE environment variable (default: 0.90). It is not
+    caller-configurable to prevent intentional or accidental bypass.
+    """
+    sources = _parse_sources(sources_json)
+    return json.dumps(verify_synthesis(synthesis, sources, _HARD_GATE))
 
 
 @mcp.tool()
 def research_cite(synthesis: str, sources_json: str,
                   insert_threshold: float = 3.5, verify_threshold: float = 1.0) -> str:
     """BM25 citation injection. Returns {cited_text, inserted, flagged, source_list, coverage_pct}."""
-    sources: List[Dict[str, Any]] = json.loads(sources_json) if sources_json else []
+    sources = _parse_sources(sources_json)
     return json.dumps(bm25_cite(synthesis, sources, insert_threshold, verify_threshold))
 
 
