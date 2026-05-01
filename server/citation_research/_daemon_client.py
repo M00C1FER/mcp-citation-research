@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 from typing import Any, Dict, List
+from urllib.parse import urlencode
 
 import requests
 
@@ -68,7 +69,7 @@ class DaemonClient:
         })
 
     def session_status(self, session_id: str) -> Dict[str, Any]:
-        return self._get(f"/session/status?session_id={session_id}")
+        return self._get(f"/session/status?{urlencode({'session_id': session_id})}")
 
     def session_close(self, session_id: str) -> Dict[str, Any]:
         return self._post("/session/close", {"session_id": session_id})
