@@ -6,6 +6,7 @@ import (
 "net/http"
 "net/http/httptest"
 "strings"
+"sync/atomic"
 "testing"
 "time"
 )
@@ -281,5 +282,150 @@ for i, p := range pages {
 if p.URL != urls[i] {
 t.Errorf("pages[%d].URL = %q, want %q", i, p.URL, urls[i])
 }
+}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// isFetchTransient — unit tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+func TestIsFetchTransient_TransientCodes(t *testing.T) {
+transient := []int{
+http.StatusTooManyRequests,   // 429
+http.StatusInternalServerError, // 500
+http.StatusBadGateway,          // 502
+http.StatusServiceUnavailable,  // 503
+http.StatusGatewayTimeout,      // 504
+}
+for _, code := range transient {
+if !isFetchTransient(code) {
+t.Errorf("isFetchTransient(%d) = false, want true", code)
+}
+}
+}
+
+func TestIsFetchTransient_PermanentCodes(t *testing.T) {
+permanent := []int{
+http.StatusOK,          // 200
+http.StatusBadRequest,  // 400
+http.StatusUnauthorized, // 401
+http.StatusForbidden,   // 403
+http.StatusNotFound,    // 404
+}
+for _, code := range permanent {
+if isFetchTransient(code) {
+t.Errorf("isFetchTransient(%d) = true, want false", code)
+}
+}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// fetchAttempt — retry signal tests (package-internal)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestFetchAttempt_502SignalsRetry verifies that a 502 response causes
+// fetchAttempt to return a non-zero retryDelay.
+func TestFetchAttempt_502SignalsRetry(t *testing.T) {
+srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+http.Error(w, "bad gateway", http.StatusBadGateway)
+}))
+defer srv.Close()
+
+_, retryDelay := fetchAttempt(context.Background(), srv.URL, 5*time.Second, 0)
+if retryDelay == 0 {
+t.Error("fetchAttempt: expected non-zero retryDelay for 502, got 0")
+}
+}
+
+// TestFetchAttempt_404DoesNotRetry verifies that a 404 response (permanent
+// client error) causes fetchAttempt to return retryDelay == 0.
+func TestFetchAttempt_404DoesNotRetry(t *testing.T) {
+srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+http.Error(w, "not found", http.StatusNotFound)
+}))
+defer srv.Close()
+
+_, retryDelay := fetchAttempt(context.Background(), srv.URL, 5*time.Second, 0)
+if retryDelay != 0 {
+t.Errorf("fetchAttempt: expected retryDelay==0 for 404, got %v", retryDelay)
+}
+}
+
+// TestFetchAttempt_RetryAfterParsed verifies that a Retry-After header on a 429
+// response is parsed and returned as the retryDelay (capped at 10 s).
+func TestFetchAttempt_RetryAfterParsed(t *testing.T) {
+srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+w.Header().Set("Retry-After", "2")
+http.Error(w, "too many requests", http.StatusTooManyRequests)
+}))
+defer srv.Close()
+
+_, retryDelay := fetchAttempt(context.Background(), srv.URL, 5*time.Second, 0)
+if retryDelay != 2*time.Second {
+t.Errorf("fetchAttempt: expected retryDelay=2s from Retry-After header, got %v", retryDelay)
+}
+}
+
+// TestFetchAttempt_RetryAfterCapped verifies that a very large Retry-After
+// value is capped at 10 s to prevent runaway sleeps.
+func TestFetchAttempt_RetryAfterCapped(t *testing.T) {
+srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+w.Header().Set("Retry-After", "3600") // 1 hour — must be capped
+http.Error(w, "too many requests", http.StatusTooManyRequests)
+}))
+defer srv.Close()
+
+_, retryDelay := fetchAttempt(context.Background(), srv.URL, 5*time.Second, 0)
+if retryDelay > 10*time.Second {
+t.Errorf("fetchAttempt: retryDelay %v exceeds 10 s cap", retryDelay)
+}
+}
+
+// TestFetchAttempt_SuccessNoRetry verifies that a 200 OK response returns
+// retryDelay == 0 (no retry needed).
+func TestFetchAttempt_SuccessNoRetry(t *testing.T) {
+srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+w.Header().Set("Content-Type", "text/html")
+_, _ = w.Write([]byte("<html><head><title>Test</title></head><body>Hello</body></html>"))
+}))
+defer srv.Close()
+
+page, retryDelay := fetchAttempt(context.Background(), srv.URL, 5*time.Second, 0)
+if retryDelay != 0 {
+t.Errorf("fetchAttempt: expected no retry for 200 OK, got retryDelay=%v", retryDelay)
+}
+if !page.OK {
+t.Errorf("fetchAttempt: expected OK=true for 200 response, got OK=false (err: %s)", page.Error)
+}
+}
+
+// TestFetchAttempt_503RetryWithSuccessOnSecond exercises the full retry loop
+// via fetchOne (indirectly): first request returns 503, second returns 200.
+// Note: fetchOne validates URLs so we can only test via fetchAttempt directly.
+func TestFetchAttempt_503RetryCount(t *testing.T) {
+var calls atomic.Int32
+srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+n := calls.Add(1)
+if n < 2 {
+http.Error(w, "unavailable", http.StatusServiceUnavailable)
+return
+}
+w.Header().Set("Content-Type", "text/html")
+_, _ = w.Write([]byte("<html><head><title>OK</title></head><body>Done</body></html>"))
+}))
+defer srv.Close()
+
+// Call fetchAttempt twice (simulating the retry loop) to verify that
+// the second attempt succeeds.
+_, retry1 := fetchAttempt(context.Background(), srv.URL, 5*time.Second, 0)
+if retry1 == 0 {
+t.Fatal("first attempt (503): expected retry signal, got none")
+}
+page2, retry2 := fetchAttempt(context.Background(), srv.URL, 5*time.Second, 1)
+if retry2 != 0 {
+t.Errorf("second attempt (200): expected no retry, got retryDelay=%v", retry2)
+}
+if !page2.OK {
+t.Errorf("second attempt: expected OK=true, got OK=false (err: %s)", page2.Error)
 }
 }
