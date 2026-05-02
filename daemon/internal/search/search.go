@@ -28,6 +28,8 @@ Score   float64 `json:"score"`
 
 // Engine is the interface that wraps a single search backend.
 type Engine interface {
+// Name returns a short identifier for the engine (e.g. "searxng", "duckduckgo").
+Name() string
 Search(ctx context.Context, query string, max int) ([]Result, error)
 }
 
@@ -37,12 +39,18 @@ Engines []Engine
 }
 
 // NewDefault builds a Multi with the engines that are available in a standard
-// NEXUS deployment. Currently: SearXNG and DuckDuckGo.
+// NEXUS deployment.
+//
+//   - When searxngURL is non-empty both SearXNG and DuckDuckGo are registered
+//     (SearXNG first so its results appear higher in early RRF rounds).
+//   - When searxngURL is empty only DuckDuckGo is registered as a zero-
+//     infrastructure fallback.
 func NewDefault(searxngURL string) *Multi {
-return &Multi{Engines: []Engine{
-&SearXNG{BaseURL: searxngURL},
-NewDuckDuckGo(),
-}}
+engines := []Engine{NewDuckDuckGo()}
+if searxngURL != "" {
+engines = []Engine{&SearXNG{BaseURL: searxngURL}, NewDuckDuckGo()}
+}
+return &Multi{Engines: engines}
 }
 
 // Run issues all (query, engine) pairs concurrently and returns the
@@ -123,6 +131,8 @@ return out
 type SearXNG struct {
 BaseURL string
 }
+
+func (s *SearXNG) Name() string { return "searxng" }
 
 // Search queries the SearXNG JSON API.
 func (s *SearXNG) Search(ctx context.Context, query string, max int) ([]Result, error) {
