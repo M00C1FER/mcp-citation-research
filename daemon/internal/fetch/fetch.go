@@ -184,12 +184,13 @@ var walk func(*html.Node)
 walk = func(n *html.Node) {
 if n.Type == html.ElementNode {
 switch n.Data {
-case "script", "style", "noscript", "head":
+case "script", "style", "noscript":
 return
 case "title":
 if n.FirstChild != nil && n.FirstChild.Type == html.TextNode {
 title = strings.TrimSpace(n.FirstChild.Data)
 }
+return
 }
 }
 if n.Type == html.TextNode {
