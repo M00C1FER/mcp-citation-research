@@ -140,13 +140,14 @@ http.Error(w, "session not found", http.StatusNotFound)
 return
 }
 st.Update(req.Iteration, req.Considered, req.Fetched)
+snap := st.GetSnapshot(session.DefaultMandate)
 writeJSON(w, map[string]any{
 "ok":                 true,
-"iteration":          st.Iteration,
-"sources_considered": st.SourcesConsidered,
-"sources_fetched":    st.SourcesFetched,
-"unique_domains":     st.UniqueDomains,
-"mandate_met":        st.MandateMet(session.DefaultMandate),
+"iteration":          snap.Iteration,
+"sources_considered": snap.SourcesConsidered,
+"sources_fetched":    snap.SourcesFetched,
+"unique_domains":     snap.UniqueDomains,
+"mandate_met":        snap.MandateMet,
 })
 }
 
@@ -157,15 +158,16 @@ if !ok {
 http.Error(w, "session not found", http.StatusNotFound)
 return
 }
+snap := st.GetSnapshot(session.DefaultMandate)
 writeJSON(w, map[string]any{
 "session_id":         st.ID,
 "topic":              st.Topic,
 "depth":              st.Depth,
-"iteration":          st.Iteration,
-"sources_considered": st.SourcesConsidered,
-"sources_fetched":    st.SourcesFetched,
-"unique_domains":     st.UniqueDomains,
-"mandate_met":        st.MandateMet(session.DefaultMandate),
+"iteration":          snap.Iteration,
+"sources_considered": snap.SourcesConsidered,
+"sources_fetched":    snap.SourcesFetched,
+"unique_domains":     snap.UniqueDomains,
+"mandate_met":        snap.MandateMet,
 })
 }
 
