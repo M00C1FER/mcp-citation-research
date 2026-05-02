@@ -23,9 +23,9 @@ After a survey of 70+ MCP servers in the [official registry](https://registry.mo
 | Layer | Language | Why |
 |---|---|---|
 | Daemon (search/fetch/iterate/session) | **Go** | I/O-bound; native goroutines beat Python asyncio; single 9.7 MB binary |
-| MCP frontend (verify/cite + tool surface) | **Python** | LLM-bound; Anthropic SDK ecosystem; `rank_bm25` + FastMCP |
+| MCP frontend (verify/cite + tool surface) | **Python** | LLM-bound; mature LLM SDK ecosystem; `rank_bm25` + FastMCP |
 
-Networking → Go (native goroutines, single static binary). LLM-orchestration → Python (Anthropic SDK ecosystem). Most MCP servers are pure Python; this one splits at the right boundary.
+Networking → Go (native goroutines, single static binary). LLM-orchestration → Python (mature SDK ecosystem). Most MCP servers are pure Python; this one splits at the right boundary.
 
 ## What it does
 
