@@ -5,26 +5,95 @@ on:
   pull_request:
     branches: [main, master]
 
+# Minimal GITHUB_TOKEN permissions: read-only checkout is all these jobs need.
+permissions:
+  contents: read
+
 jobs:
+  # ── Go daemon: hosted runners (ubuntu-22.04, ubuntu-24.04, ubuntu-latest) ──
   go-daemon:
+    name: "go-daemon (${{ matrix.os }})"
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+      - name: Test daemon (race detector)
+        working-directory: daemon
+        run: go test -race ./...
+      - name: Build daemon
+        working-directory: daemon
+        run: go build -o /tmp/citation-researchd ./cmd/citation-researchd
+
+  # ── Go daemon: Debian 12 (Bookworm) container ───────────────────────────
+  go-daemon-debian:
+    name: "go-daemon (debian:12)"
+    runs-on: ubuntu-latest
+    container:
+      image: golang:1.23-bookworm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test daemon (race detector)
+        working-directory: daemon
+        run: go test -race ./...
+      - name: Build daemon
+        working-directory: daemon
+        run: go build -o /tmp/citation-researchd ./cmd/citation-researchd
+
+  # ── Go daemon: Alpine (musl libc) container ─────────────────────────────
+  # Race detector requires CGO + glibc; it is skipped on musl/Alpine.
+  # CGO_ENABLED=0 produces a fully static binary that is the recommended
+  # Alpine / Docker / Termux build mode.
+  go-daemon-alpine:
+    name: "go-daemon (alpine)"
+    runs-on: ubuntu-latest
+    container:
+      image: golang:1.23-alpine
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install git (required by actions/checkout inside Alpine)
+        run: apk add --no-cache git
+      - name: Test daemon (no -race on musl)
+        working-directory: daemon
+        run: go test ./...
+      - name: Build daemon (static, CGO_ENABLED=0)
+        working-directory: daemon
+        run: CGO_ENABLED=0 go build -o /tmp/citation-researchd ./cmd/citation-researchd
+
+  # ── Go cross-compilation check ──────────────────────────────────────────
+  # Verifies that the daemon compiles for all supported targets.
+  # CGO_ENABLED=0 is required for cross-compilation without a cross-toolchain.
+  go-cross-build:
+    name: "go cross-build"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: "1.23"
-      - name: Test daemon
+      - name: Cross-compile for all targets
         working-directory: daemon
-        run: go test ./...
-      - name: Build daemon
-        working-directory: daemon
-        run: go build -o /tmp/citation-researchd ./cmd/citation-researchd
+        run: |
+          set -e
+          CGO_ENABLED=0 GOOS=linux  GOARCH=amd64       go build -o /tmp/cr-linux-amd64   ./cmd/citation-researchd
+          CGO_ENABLED=0 GOOS=linux  GOARCH=arm64       go build -o /tmp/cr-linux-arm64   ./cmd/citation-researchd
+          CGO_ENABLED=0 GOOS=linux  GOARCH=arm  GOARM=7 go build -o /tmp/cr-linux-armv7  ./cmd/citation-researchd
+          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64       go build -o /tmp/cr-darwin-amd64  ./cmd/citation-researchd
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64       go build -o /tmp/cr-darwin-arm64  ./cmd/citation-researchd
+          echo "All cross-compilation targets succeeded."
 
+  # ── Python frontend: hosted runners ────────────────────────────────────
   python-frontend:
-    runs-on: ubuntu-latest
+    name: "python (${{ matrix.python-version }}, ${{ matrix.os }})"
     strategy:
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        os: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -34,6 +103,27 @@ jobs:
         working-directory: server
         run: |
           python -m pip install --upgrade pip
+          pip install -e .[dev]
+      - name: Test
+        working-directory: server
+        run: pytest -v
+
+  # ── Python frontend: Alpine (musl libc smoke test) ──────────────────────
+  # musllinux wheels are available for pydantic-core and most heavy deps;
+  # gcc + musl-dev cover the rare packages that still need compilation.
+  python-alpine:
+    name: "python (alpine)"
+    runs-on: ubuntu-latest
+    container:
+      image: python:3.12-alpine
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: apk add --no-cache gcc musl-dev libffi-dev git
+      - name: Install
+        working-directory: server
+        run: |
+          pip install --upgrade pip
           pip install -e .[dev]
       - name: Test
         working-directory: server
