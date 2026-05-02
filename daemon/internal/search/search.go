@@ -22,6 +22,7 @@ type Result struct {
 URL     string  `json:"url"`
 Title   string  `json:"title"`
 Snippet string  `json:"snippet"`
+Engine  string  `json:"engine,omitempty"`
 Score   float64 `json:"score"`
 }
 
@@ -36,9 +37,12 @@ Engines []Engine
 }
 
 // NewDefault builds a Multi with the engines that are available in a standard
-// NEXUS deployment. Currently: SearXNG.
+// NEXUS deployment. Currently: SearXNG and DuckDuckGo.
 func NewDefault(searxngURL string) *Multi {
-return &Multi{Engines: []Engine{&SearXNG{BaseURL: searxngURL}}}
+return &Multi{Engines: []Engine{
+&SearXNG{BaseURL: searxngURL},
+NewDuckDuckGo(),
+}}
 }
 
 // Run issues all (query, engine) pairs concurrently and returns the
@@ -150,7 +154,12 @@ for i, r := range payload.Results {
 if i >= max {
 break
 }
-results = append(results, Result{URL: r.URL, Title: r.Title, Snippet: r.Content})
+results = append(results, Result{
+URL:     r.URL,
+Title:   r.Title,
+Snippet: r.Content,
+Engine:  "searxng",
+})
 }
 return results, nil
 }
