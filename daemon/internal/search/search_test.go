@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -37,7 +38,8 @@ func TestSearXNG_HTTPError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	engine := &SearXNG{BaseURL: srv.URL}
+	// Use a very short backoff so the retry loop completes quickly in tests.
+	engine := &SearXNG{BaseURL: srv.URL, BaseBackoff: 1 * time.Millisecond}
 	_, err := engine.Search(context.Background(), "test query", 10)
 	if err == nil {
 		t.Error("SearXNG.Search: expected error for HTTP 503 response, got nil")
@@ -113,6 +115,101 @@ func TestSearXNG_EmptyResults(t *testing.T) {
 	}
 	if len(results) != 0 {
 		t.Errorf("expected 0 results, got %d", len(results))
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SearXNG — retry / resilience
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestSearXNG_502Retried verifies that a 502 response triggers a retry and that
+// a subsequent success is returned to the caller.
+func TestSearXNG_502Retried(t *testing.T) {
+	var calls atomic.Int32
+	body := `{"results":[{"url":"https://retry.example.com/","title":"Retried","content":"ok"}]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) < 2 {
+			// First call: simulate a bad-gateway transient error.
+			http.Error(w, "bad gateway", http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	engine := &SearXNG{BaseURL: srv.URL, BaseBackoff: 1 * time.Millisecond}
+	results, err := engine.Search(context.Background(), "test", 10)
+	if err != nil {
+		t.Fatalf("expected success after retry, got error: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected at least one result after successful retry")
+	}
+	if calls.Load() < 2 {
+		t.Errorf("expected at least 2 HTTP calls (1 transient + 1 success), got %d", calls.Load())
+	}
+}
+
+// TestSearXNG_404NotRetried verifies that a 404 (permanent client error) is
+// returned immediately without any retry.
+func TestSearXNG_404NotRetried(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	engine := &SearXNG{BaseURL: srv.URL, BaseBackoff: 1 * time.Millisecond}
+	_, err := engine.Search(context.Background(), "test", 10)
+	if err == nil {
+		t.Fatal("expected error for HTTP 404, got nil")
+	}
+	if calls.Load() != 1 {
+		t.Errorf("404 must not be retried: expected exactly 1 call, got %d", calls.Load())
+	}
+}
+
+// TestSearXNG_JSONErrorField verifies that a JSON 200 response containing a
+// non-empty "error" field is returned as an error (quota exhaustion pattern).
+func TestSearXNG_JSONErrorField(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"error":"rate limit exceeded","results":[]}`))
+	}))
+	defer srv.Close()
+
+	engine := &SearXNG{BaseURL: srv.URL}
+	_, err := engine.Search(context.Background(), "test", 10)
+	if err == nil {
+		t.Fatal("expected error for JSON error field, got nil")
+	}
+}
+
+// TestSearXNG_RetryAfterHeader verifies that a 429 response with a
+// Retry-After header is handled gracefully (no crash / no excessive wait in test).
+func TestSearXNG_RetryAfterHeader(t *testing.T) {
+	var calls atomic.Int32
+	body := `{"results":[{"url":"https://ra.example.com/","title":"After retry","content":"ok"}]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			w.Header().Set("Retry-After", "0") // 0 s → immediate retry in test
+			http.Error(w, "too many requests", http.StatusTooManyRequests)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	engine := &SearXNG{BaseURL: srv.URL, BaseBackoff: 1 * time.Millisecond}
+	results, err := engine.Search(context.Background(), "test", 10)
+	if err != nil {
+		t.Fatalf("expected success after 429+retry, got: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected results after successful retry")
 	}
 }
 

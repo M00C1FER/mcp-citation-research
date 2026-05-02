@@ -5,9 +5,11 @@ import (
 "context"
 "fmt"
 "io"
+"math/rand"
 "net"
 "net/http"
 "net/url"
+"strconv"
 "strings"
 "sync"
 "time"
@@ -133,19 +135,81 @@ wg.Wait()
 return pages
 }
 
+// isFetchTransient reports whether an HTTP status is worth retrying on fetch.
+func isFetchTransient(code int) bool {
+return code == http.StatusTooManyRequests ||
+code == http.StatusInternalServerError ||
+code == http.StatusBadGateway ||
+code == http.StatusServiceUnavailable ||
+code == http.StatusGatewayTimeout
+}
+
+// fetchBackoff returns the delay before the next fetch retry.
+// A Retry-After header is honoured when present (capped at 10 s); otherwise
+// exponential back-off with uniform jitter in [0, 500 ms) is used.
+func fetchBackoff(resp *http.Response, attempt int) time.Duration {
+if resp != nil {
+if ra := resp.Header.Get("Retry-After"); ra != "" {
+if secs, err := strconv.Atoi(ra); err == nil && secs > 0 {
+d := time.Duration(secs) * time.Second
+if d > 10*time.Second {
+d = 10 * time.Second
+}
+return d
+}
+}
+}
+const base = 500 * time.Millisecond
+backoff := base * (1 << uint(attempt))
+jitter := time.Duration(rand.Int63n(int64(base))) //nolint:gosec // non-crypto use
+return backoff + jitter
+}
+
 // fetchOne fetches and extracts the text content of a single URL.
+// Transient HTTP errors (429, 500, 502, 503, 504) are retried up to 2 times
+// with exponential back-off before returning a failed Page.
 func fetchOne(ctx context.Context, rawURL string, timeout time.Duration) Page {
 // Validate before issuing any network request to prevent SSRF.
 if err := validateURL(rawURL); err != nil {
 return Page{URL: rawURL, OK: false, Error: err.Error(), Tier: 1}
 }
 
+const maxAttempts = 3
+var lastPage Page
+var nextDelay time.Duration
+for attempt := 0; attempt < maxAttempts; attempt++ {
+if attempt > 0 {
+select {
+case <-ctx.Done():
+return Page{URL: rawURL, OK: false, Error: ctx.Err().Error(), Tier: 2}
+case <-time.After(nextDelay):
+}
+}
+
+var retryDelay time.Duration
+lastPage, retryDelay = fetchAttempt(ctx, rawURL, timeout, attempt)
+if retryDelay == 0 {
+// Zero delay means no retry requested — return immediately.
+return lastPage
+}
+// Non-zero: transient error; sleep for retryDelay before the next attempt.
+nextDelay = retryDelay
+if attempt == maxAttempts-1 {
+return lastPage
+}
+}
+return lastPage
+}
+
+// fetchAttempt performs a single HTTP GET and returns (Page, retryDelay).
+// retryDelay == 0 means "do not retry"; retryDelay > 0 means "retry after this delay".
+func fetchAttempt(ctx context.Context, rawURL string, timeout time.Duration, attempt int) (Page, time.Duration) {
 c, cancel := context.WithTimeout(ctx, timeout)
 defer cancel()
 
 req, err := http.NewRequestWithContext(c, "GET", rawURL, nil)
 if err != nil {
-return Page{URL: rawURL, OK: false, Error: err.Error(), Tier: 1}
+return Page{URL: rawURL, OK: false, Error: err.Error(), Tier: 1}, 0
 }
 req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; citation-researchd/1.0)")
 req.Header.Set("Accept", "text/html,application/xhtml+xml")
@@ -155,22 +219,29 @@ req.Header.Set("Accept-Language", "en")
 // new http.Client per request (which disables TCP keep-alive reuse).
 resp, err := _fetchClient.Do(req)
 if err != nil {
-return Page{URL: rawURL, OK: false, Error: err.Error(), Tier: 2}
+// Network errors (connection refused, timeout) are retried.
+return Page{URL: rawURL, OK: false, Error: err.Error(), Tier: 2}, fetchBackoff(nil, attempt)
 }
 defer resp.Body.Close()
 
+if isFetchTransient(resp.StatusCode) {
+// Drain body so the connection can be reused, then signal retry.
+_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+return Page{URL: rawURL, OK: false, Error: fmt.Sprintf("HTTP %d", resp.StatusCode), Tier: 3},
+fetchBackoff(resp, attempt)
+}
 if resp.StatusCode >= 400 {
-return Page{URL: rawURL, OK: false, Error: fmt.Sprintf("HTTP %d", resp.StatusCode), Tier: 3}
+return Page{URL: rawURL, OK: false, Error: fmt.Sprintf("HTTP %d", resp.StatusCode), Tier: 3}, 0
 }
 
 ct := resp.Header.Get("Content-Type")
 if !strings.Contains(ct, "text/html") && !strings.Contains(ct, "application/xhtml") {
 body, _ := io.ReadAll(io.LimitReader(resp.Body, 512*1024))
-return Page{URL: rawURL, OK: true, Text: string(body), Tier: 4}
+return Page{URL: rawURL, OK: true, Text: string(body), Tier: 4}, 0
 }
 
 title, text := extractHTML(resp.Body)
-return Page{URL: rawURL, OK: true, Title: title, Text: text, Tier: 5}
+return Page{URL: rawURL, OK: true, Title: title, Text: text, Tier: 5}, 0
 }
 
 // extractHTML walks the HTML parse tree and returns (title, visible text).

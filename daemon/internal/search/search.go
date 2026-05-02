@@ -10,9 +10,11 @@ import (
 "context"
 "encoding/json"
 "fmt"
+"math/rand"
 "net/http"
 "net/url"
 "sort"
+"strconv"
 "sync"
 "time"
 )
@@ -128,28 +130,115 @@ return out
 }
 
 // SearXNG wraps a running SearXNG instance.
+//
+// BaseBackoff controls the initial delay before each retry (default: 500 ms).
+// Set a shorter value in tests to avoid waiting for the production delay.
 type SearXNG struct {
-BaseURL string
+BaseURL     string
+BaseBackoff time.Duration // 0 means use 500 ms default
 }
 
 func (s *SearXNG) Name() string { return "searxng" }
 
-// Search queries the SearXNG JSON API.
+// isTransientStatus reports whether an HTTP status code is worth retrying.
+// 429 (rate-limited) and 5xx gateway/timeout codes are transient; all other
+// 4xx codes represent permanent client errors.
+func isTransientStatus(code int) bool {
+return code == http.StatusTooManyRequests ||
+code == http.StatusBadGateway ||
+code == http.StatusServiceUnavailable ||
+code == http.StatusGatewayTimeout ||
+code == http.StatusInternalServerError
+}
+
+// retryAfterDelay returns the duration to sleep before the next retry.
+// If the response contains a valid Retry-After header its value is used
+// (capped at 10 s); otherwise exponential back-off with jitter is applied.
+func retryAfterDelay(resp *http.Response, attempt int, base time.Duration) time.Duration {
+if resp != nil {
+if ra := resp.Header.Get("Retry-After"); ra != "" {
+if secs, err := strconv.Atoi(ra); err == nil && secs > 0 {
+d := time.Duration(secs) * time.Second
+if d > 10*time.Second {
+d = 10 * time.Second
+}
+return d
+}
+}
+}
+// base * 2^attempt + uniform jitter in [0, base)
+backoff := base * (1 << uint(attempt))
+jitter := time.Duration(rand.Int63n(int64(base))) //nolint:gosec // non-crypto use
+return backoff + jitter
+}
+
+// _searxngClient is reused across Search calls to benefit from connection
+// pooling. The timeout is intentionally short — callers set per-request
+// deadlines via context.WithTimeout.
+var _searxngClient = &http.Client{
+Transport: &http.Transport{
+MaxIdleConnsPerHost: 4,
+IdleConnTimeout:     30 * time.Second,
+TLSHandshakeTimeout: 10 * time.Second,
+},
+}
+
+// Search queries the SearXNG JSON API with up to 3 attempts for transient
+// errors (429, 502, 503, 504, 500). Permanent errors (4xx except 429) are
+// returned immediately without retry.
 func (s *SearXNG) Search(ctx context.Context, query string, max int) ([]Result, error) {
-client := &http.Client{Timeout: 10 * time.Second}
+const maxAttempts = 3
+baseBackoff := s.BaseBackoff
+if baseBackoff <= 0 {
+baseBackoff = 500 * time.Millisecond
+}
+
 apiURL := fmt.Sprintf("%s/search?q=%s&format=json&pageno=1",
 s.BaseURL, url.QueryEscape(query))
+
+var lastErr error
+for attempt := 0; attempt < maxAttempts; attempt++ {
+if attempt > 0 {
+select {
+case <-ctx.Done():
+return nil, ctx.Err()
+case <-time.After(retryAfterDelay(nil, attempt-1, baseBackoff)):
+}
+}
+
 req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
 if err != nil {
 return nil, err
 }
-resp, err := client.Do(req)
+
+resp, err := _searxngClient.Do(req)
 if err != nil {
-return nil, err
+lastErr = err
+// Network-level errors (connection refused, timeout) are retried.
+continue
 }
-defer resp.Body.Close()
+
+// Check HTTP status before reading the body.
+if resp.StatusCode != http.StatusOK {
+delay := retryAfterDelay(resp, attempt, baseBackoff)
+_ = resp.Body.Close()
+if isTransientStatus(resp.StatusCode) {
+lastErr = fmt.Errorf("SearXNG returned HTTP %d", resp.StatusCode)
+if attempt < maxAttempts-1 {
+select {
+case <-ctx.Done():
+return nil, ctx.Err()
+case <-time.After(delay):
+}
+}
+continue
+}
+// Non-transient HTTP error — don't retry.
+return nil, fmt.Errorf("SearXNG returned HTTP %d", resp.StatusCode)
+}
 
 var payload struct {
+Error   string `json:"error"`
 Results []struct {
 URL     string `json:"url"`
 Title   string `json:"title"`
@@ -157,8 +246,17 @@ Content string `json:"content"`
 } `json:"results"`
 }
 if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+_ = resp.Body.Close()
 return nil, err
 }
+_ = resp.Body.Close()
+
+// SearXNG can return HTTP 200 with a JSON-level error field on quota
+// exhaustion or misconfiguration.
+if payload.Error != "" {
+return nil, fmt.Errorf("SearXNG error: %s", payload.Error)
+}
+
 results := make([]Result, 0, len(payload.Results))
 for i, r := range payload.Results {
 if i >= max {
@@ -172,4 +270,6 @@ Engine:  "searxng",
 })
 }
 return results, nil
+}
+return nil, lastErr
 }
