@@ -84,6 +84,40 @@ these documented transient codes.
 
 ---
 
+## 6. golang/go (static CGO_ENABLED=0 builds)
+
+**Repo**: https://github.com/golang/go  
+**Stars**: ~125 k · BSD-3-Clause · active  
+**Relevant pattern**: Setting `CGO_ENABLED=0` at build time produces a fully
+static binary that links against the Go runtime only (no libc dependency). This
+is the canonical way to produce binaries that run identically on glibc distros
+(Debian, Ubuntu), musl distros (Alpine, Termux Bionic), and container scratch
+images. The Go standard library's `net` package includes a pure-Go DNS resolver
+(`netgo`) that activates automatically when CGO is disabled.
+
+**Adopted here**: `install.sh`, `scripts/install-termux.sh`, and the CI
+`go-cross-build` job all use `CGO_ENABLED=0`. The Alpine and Termux CI jobs
+verify the static build path explicitly.
+
+---
+
+## 7. nicowillis/go-alpine (Alpine/musl CI patterns)
+
+**Repo**: https://github.com/nicowillis/go-alpine (representative of the
+`golang:*-alpine` Docker image family published by the Go team)  
+**Stars**: N/A — pattern taken from the official `golang:1.x-alpine` Docker image
+documentation and Go team release notes  
+**Relevant pattern**: The official `golang:x.y-alpine` Docker image is the
+standard way to verify Go binaries on musl libc in CI. The Go race detector
+requires CGO and glibc; it must be skipped (`go test ./...` without `-race`) in
+Alpine containers. Pure Alpine-compatible Go packages work without modification
+as long as no cgo shims are used.
+
+**Adopted here**: `go-daemon-alpine` CI job uses `golang:1.23-alpine` and skips
+`-race` with an explanatory comment.
+
+---
+
 ## Summary of patterns adopted
 
 | Pattern | Source | Location in this repo |
@@ -94,3 +128,5 @@ these documented transient codes.
 | Check JSON `"error"` field | serpapi | `daemon/internal/search/search.go` |
 | Explicit HTTP status check | all five | `daemon/internal/search/search.go` |
 | Full parameter docs in MCP tools | modelcontextprotocol/servers | `server/citation_research/mcp_server.py` |
+| `CGO_ENABLED=0` static binary | golang/go | `install.sh`, `scripts/install-termux.sh`, CI |
+| Alpine/musl CI pattern (skip -race) | golang Alpine image | `.github/workflows/ci.yml` |

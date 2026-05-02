@@ -5,7 +5,7 @@
 > Hybrid Go + Python by design: I/O daemon in Go (native goroutines, single binary), Python MCP frontend for verify and cite (rank_bm25, FastMCP). Synthesis stays inline in the calling MCP client's context window — your model does the writing, this server enforces the discipline.
 
 [![CI](https://github.com/M00C1FER/mcp-citation-research/actions/workflows/ci.yml/badge.svg)](https://github.com/M00C1FER/mcp-citation-research/actions)
-![Go](https://img.shields.io/badge/go-1.22+-blue)
+![Go](https://img.shields.io/badge/go-1.23+-blue)
 ![Python](https://img.shields.io/badge/python-3.10+-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -108,6 +108,43 @@ cd daemon && go test ./...
 # Python frontend
 cd server && pip install -e .[dev] && pytest
 ```
+
+## Cross-platform support
+
+| Platform | Go daemon | Python frontend | Notes |
+|---|:-:|:-:|---|
+| Debian 12/13 | ✅ | ✅ | Primary target |
+| Ubuntu 22.04 / 24.04 | ✅ | ✅ | CI-tested |
+| Alpine (musl libc) | ✅ (`CGO_ENABLED=0`) | ✅ | Static binary; race detector unavailable (musl) |
+| WSL 2 (Ubuntu base) | ✅ | ✅ | No `/proc/sys/kernel/osrelease`, systemd, or `/etc/passwd` assumptions in the daemon |
+| macOS (amd64 / arm64) | ✅ (cross-compile verified) | ✅ | Daemon not yet CI-tested on macOS runner |
+| Arch / Fedora | ✅ (best-effort) | ✅ (best-effort) | Not in CI matrix |
+| **Termux (Android arm64)** | ✅ (`CGO_ENABLED=0`) | ✅ | See [Termux install](#termux) below |
+
+**Multiple daemon instances**: each instance maintains independent in-memory session state. Running two daemons on the same host is safe as long as they listen on different addresses/ports (e.g. `-addr 127.0.0.1:8090` vs `-addr 127.0.0.1:8091`). Session IDs from one daemon are not visible to another.
+
+## Termux
+
+Install on Android (arm64) in one step:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/M00C1FER/mcp-citation-research/main/scripts/install-termux.sh | bash
+```
+
+Or run `scripts/install-termux.sh` from a local clone. The script:
+
+1. Installs `golang`, `python`, `git`, `openssl` via `pkg`
+2. Clones the repo to `~/mcp-citation-research`
+3. Builds `citation-researchd` with `CGO_ENABLED=0` (fully static binary)
+4. Installs the Python MCP frontend into a venv
+5. Generates a bearer-auth token and drops launcher scripts into `~/.local/bin`
+6. Runs a smoke test (healthz + auth check on a temporary port)
+
+**Caveats**:
+- SearXNG is not available in Termux; search uses DuckDuckGo scraping only.
+- The daemon binds to `127.0.0.1` (loopback). Other Android apps cannot reach it.
+- The race detector (`-race`) is unavailable on Termux (requires CGO + glibc).
+- To keep the daemon alive after closing the terminal, use [Termux:Boot](https://wiki.termux.com/wiki/Termux:Boot).
 
 ## License
 
