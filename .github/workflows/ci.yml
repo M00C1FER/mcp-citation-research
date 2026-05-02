@@ -5,6 +5,10 @@ on:
   pull_request:
     branches: [main, master]
 
+# Minimal GITHUB_TOKEN permissions: read-only checkout is all these jobs need.
+permissions:
+  contents: read
+
 jobs:
   # ── Go daemon: hosted runners (ubuntu-22.04, ubuntu-24.04, ubuntu-latest) ──
   go-daemon:

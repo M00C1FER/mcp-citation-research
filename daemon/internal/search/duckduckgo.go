@@ -58,6 +58,12 @@ func (d *DuckDuckGo) Search(ctx context.Context, query string, maxResults int) (
 // parseDDGResults walks the DDG HTML tree and collects result tuples.
 // DDG's HTML page has stable class names: result__a (link/title), result__snippet (snippet).
 func parseDDGResults(doc *html.Node, max int) []Result {
+	// Cap the initial allocation to a reasonable ceiling so a caller-supplied
+	// large max value cannot cause a runaway heap allocation.
+	const maxCap = 200
+	if max > maxCap {
+		max = maxCap
+	}
 	out := make([]Result, 0, max)
 	var titleHref, titleText, snippet string
 
