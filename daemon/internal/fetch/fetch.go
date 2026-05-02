@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"math/rand"
 	"net"
 	"net/http"
@@ -127,6 +128,7 @@ const maxURLs = 4096
 
 func Concurrent(ctx context.Context, urls []string, maxConcurrent int, timeout time.Duration) []Page {
 	if len(urls) > maxURLs {
+		log.Printf("fetch.Concurrent: truncating URL list from %d to %d", len(urls), maxURLs)
 		urls = urls[:maxURLs]
 	}
 	sem := make(chan struct{}, maxConcurrent)
