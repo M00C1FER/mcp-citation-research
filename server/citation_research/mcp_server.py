@@ -282,7 +282,7 @@ def run() -> None:
     args = parser.parse_args()
     if args.http:
         host, _, port = args.http.partition(":")
-        mcp.run(transport="http", host=host or "127.0.0.1", port=int(port or 8091))
+        mcp.run(transport="http", host=host or os.environ.get("CITATION_MCP_HOST", "127.0.0.1"), port=int(port or os.environ.get("CITATION_MCP_PORT", "8091")))
     else:
         mcp.run()
 
