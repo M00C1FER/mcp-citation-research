@@ -43,3 +43,4 @@ include = ["citation_research*"]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-v"
+pythonpath = [".", "src"]
