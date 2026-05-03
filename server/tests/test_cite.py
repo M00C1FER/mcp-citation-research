@@ -149,3 +149,18 @@ def test_bm25_source_list_indexed_from_one(sources):
         f"source_list nums should be 1..{len(sources)}, got {nums}"
     )
 
+
+
+def test_bm25_cite_idempotent():
+    """Second bm25_cite pass on already-flagged synthesis must be a no-op."""
+    synthesis = "Quantum computers use qubits [S1]."
+    sources = [{"url": "u1", "title": "q", "content": "qubit entanglement quantum"}]
+    # threshold above any realistic BM25 score — every citation gets flagged
+    first = bm25_cite(synthesis, sources, verify_threshold=999.0)
+    assert "[S1 UNVERIFIED]" in first["cited_text"]
+    assert first["flagged"] == 1
+
+    # second pass: [S1 UNVERIFIED] must not be re-flagged or double-counted
+    second = bm25_cite(first["cited_text"], sources, verify_threshold=999.0)
+    assert second["cited_text"] == first["cited_text"]
+    assert second["flagged"] == 0

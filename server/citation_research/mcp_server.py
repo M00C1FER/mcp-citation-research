@@ -33,7 +33,19 @@ _client = DaemonClient()
 
 # Hard confidence gate — not caller-configurable to prevent bypass.
 # Override at deployment time via CITATION_RESEARCH_GATE env variable.
-_HARD_GATE = float(os.environ.get("CITATION_RESEARCH_GATE", "0.90"))
+_env_gate = os.environ.get("CITATION_RESEARCH_GATE", "0.90")
+try:
+    _HARD_GATE = float(_env_gate)
+except ValueError:
+    raise SystemExit(
+        f"CITATION_RESEARCH_GATE={_env_gate!r} is not a valid float. "
+        "Set it to a value in (0, 1], e.g. '0.90'."
+    )
+if not 0.0 < _HARD_GATE <= 1.0:
+    raise SystemExit(
+        f"CITATION_RESEARCH_GATE={_env_gate!r} ({_HARD_GATE}) is out of range. "
+        "Must be in (0, 1], e.g. '0.90'."
+    )
 
 
 def _parse_sources(sources_json: str | None) -> List[Dict[str, Any]]:

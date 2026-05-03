@@ -19,7 +19,8 @@ def _split_paragraphs(text: str) -> List[str]:
 
 
 def _existing_citations(paragraph: str) -> List[int]:
-    return [int(m.group(1)) for m in re.finditer(r"\[S(\d+)\]", paragraph)]
+    """Return 1-based citation indices, including already-flagged [S# UNVERIFIED] forms."""
+    return [int(m.group(1)) for m in re.finditer(r"\[S(\d+)(?:\s+UNVERIFIED)?\]", paragraph)]
 
 
 def bm25_cite(synthesis: str, sources: List[Dict[str, Any]],
@@ -76,8 +77,10 @@ def bm25_cite(synthesis: str, sources: List[Dict[str, Any]],
                 if cite < 1 or cite > len(sources):
                     continue
                 cite_score = float(scores[cite - 1])
-                if cite_score < verify_threshold:
-                    new_para = new_para.replace(f"[S{cite}]", f"[S{cite} UNVERIFIED]", 1)
+                tag = f"[S{cite}]"
+                if cite_score < verify_threshold and tag in new_para:
+                    # Replace [S#] with [S# UNVERIFIED]; already-flagged tags are no-ops.
+                    new_para = new_para.replace(tag, f"[S{cite} UNVERIFIED]", 1)
                     flagged += 1
             out_paragraphs.append(new_para)
         elif best_score >= insert_threshold:
