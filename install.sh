@@ -132,7 +132,7 @@ EOF
 # Token sourced from \$CITATION_RESEARCHD_TOKEN (env override) or token file.
 TOKEN="\${CITATION_RESEARCHD_TOKEN:-\$(cat "$TOKEN_FILE" 2>/dev/null || echo '')}"
 export CITATION_RESEARCHD_TOKEN="\$TOKEN"
-exec "$DAEMON_BIN" -addr 127.0.0.1:8090 -searxng "${SEARXNG_URL}" "\$@"
+exec "$DAEMON_BIN" -addr "${CITATION_RESEARCHD_ADDR:-127.0.0.1:8090}" -searxng "${SEARXNG_URL}" "\$@"
 EOF
     chmod +x "$BIN/citation-researchd-start"
 
@@ -148,12 +148,12 @@ EOF
 
     say ""; say "Step 5/5: Verify"
     local TEST_TOKEN; TEST_TOKEN="$(cat "$TOKEN_FILE" 2>/dev/null || echo '')"
-    if CITATION_RESEARCHD_TOKEN="$TEST_TOKEN" "$DAEMON_BIN" -addr "127.0.0.1:18091" -searxng "$SEARXNG_URL" >/tmp/cr.log 2>&1 & then
+    if CITATION_RESEARCHD_TOKEN="$TEST_TOKEN" "$DAEMON_BIN" -addr "${CITATION_RESEARCHD_TEST_ADDR:-127.0.0.1:18091}" -searxng "$SEARXNG_URL" >/tmp/cr.log 2>&1 & then
         local PID=$!; sleep 1
         # /healthz is exempt from auth; should always succeed
-        if curl -fsS http://127.0.0.1:18091/healthz >/dev/null 2>&1; then ok "daemon healthcheck OK"; else warn "daemon healthcheck failed (see /tmp/cr.log)"; fi
+        if curl -fsS "http://${CITATION_RESEARCHD_TEST_ADDR:-127.0.0.1:18091}/healthz" >/dev/null 2>&1; then ok "daemon healthcheck OK"; else warn "daemon healthcheck failed (see /tmp/cr.log)"; fi
         # /search must reject without the token
-        if curl -fsS -X POST http://127.0.0.1:18091/search -d '{}' >/dev/null 2>&1; then
+        if curl -fsS -X POST "http://${CITATION_RESEARCHD_TEST_ADDR:-127.0.0.1:18091}/search" -d '{}' >/dev/null 2>&1; then
             warn "auth check failed: /search accepted unauthenticated request"
         else
             ok "auth check OK: /search rejects unauthenticated requests"
