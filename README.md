@@ -52,8 +52,8 @@ graph TB
 ### Build the daemon
 ```bash
 cd daemon
-go build -o /usr/local/bin/citation-researchd ./cmd/citation-researchd
-citation-researchd -addr 127.0.0.1:8090 -searxng http://127.0.0.1:8080 &
+go build -o ./citation-researchd ./cmd/citation-researchd
+./citation-researchd -addr 127.0.0.1:8090 -searxng http://127.0.0.1:8080 &
 ```
 
 ### Install the MCP server

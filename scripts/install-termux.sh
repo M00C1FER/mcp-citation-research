@@ -110,8 +110,9 @@ ok "Launcher installed → ${BIN_DIR}/citation-researchd-start"
 log ""
 log "Smoke test: verify daemon starts on 127.0.0.1:18091"
 TOKEN="$(cat "${TOKEN_FILE}")"
+SMOKE_LOG="${TMPDIR:-/tmp}/cr-smoke.log"
 CITATION_RESEARCHD_TOKEN="${TOKEN}" \
-    "${DAEMON_BIN}" -addr 127.0.0.1:18091 >/tmp/cr-smoke.log 2>&1 &
+    "${DAEMON_BIN}" -addr 127.0.0.1:18091 >"${SMOKE_LOG}" 2>&1 &
 SMOKE_PID=$!
 sleep 2
 
@@ -119,7 +120,7 @@ SMOKE_OK=1
 if curl -fsS http://127.0.0.1:18091/healthz >/dev/null 2>&1; then
     ok "/healthz → 200 OK"
 else
-    warn "/healthz failed (see /tmp/cr-smoke.log)"
+    warn "/healthz failed (see ${SMOKE_LOG})"
     SMOKE_OK=0
 fi
 # /search must reject unauthenticated requests.
@@ -130,7 +131,7 @@ else
     ok "Auth check OK (/search rejects unauthenticated requests)"
 fi
 kill "${SMOKE_PID}" 2>/dev/null || true
-[ "${SMOKE_OK}" = "0" ] && { warn "Smoke test had warnings — check /tmp/cr-smoke.log"; }
+[ "${SMOKE_OK}" = "0" ] && { warn "Smoke test had warnings — check ${SMOKE_LOG}"; }
 
 # ── Usage hints ──────────────────────────────────────────────────────────────
 log ""
