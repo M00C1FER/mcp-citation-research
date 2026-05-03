@@ -195,7 +195,7 @@ func writeJSON(w http.ResponseWriter, v any) {
 }
 
 func main() {
-	addr := flag.String("addr", "127.0.0.1:8090", "listen address")
+	addr := flag.String("addr", envOr("CITATION_RESEARCHD_ADDR", "127.0.0.1:8090"), "listen address")
 	searxngURL := flag.String("searxng", envOr("SEARXNG_URL", "http://127.0.0.1:8080"), "SearXNG endpoint")
 	allowUnauth := flag.Bool("allow-unauthenticated", false,
 		"DANGEROUS: run without bearer-token auth even if CITATION_RESEARCHD_TOKEN is unset. "+
