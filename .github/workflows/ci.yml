@@ -37,6 +37,12 @@ jobs:
       image: golang:1.23-bookworm
     steps:
       - uses: actions/checkout@v4
+      - name: Mark workspace as Git safe directory
+        # Containerised Go builds embed VCS info via `go build`, which
+        # invokes git inside the container. Git refuses (CVE-2022-24765)
+        # when the checkout owner UID differs from the container user —
+        # the failure surfaces as `error obtaining VCS status: exit status 128`.
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Test daemon (race detector)
         working-directory: daemon
         run: go test -race ./...
