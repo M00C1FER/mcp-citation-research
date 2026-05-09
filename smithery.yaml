@@ -12,7 +12,6 @@ startCommand:
     })
 
 installation:
-  go:
-    module: github.com/M00C1FER/mcp-citation-research/daemon/cmd/citation-researchd
-    version: latest
-    command: go install github.com/M00C1FER/mcp-citation-research/daemon/cmd/citation-researchd@latest
+  pip:
+    package: git+https://github.com/M00C1FER/mcp-citation-research.git#subdirectory=server
+    command: pip install git+https://github.com/M00C1FER/mcp-citation-research.git#subdirectory=server
