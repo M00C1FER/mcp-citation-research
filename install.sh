@@ -1,169 +1,36 @@
 #!/usr/bin/env bash
-# mcp-citation-research — interactive install wizard.
-# Installs the Go daemon (citation-researchd) + Python MCP frontend.
+# mcp-citation-research — install wrapper.
+# Sources lib/installer-core.sh and delegates to run_install.
+#
+# Variables consumed by installer-core.sh:
+#   REPO_NAME      — used for install path and config-hook name
+#   ENTRY_POINT    — the console-script name to smoke-verify
+#   REPO_NEEDS_GO  — "1" triggers _install_go (downloads Go toolchain if absent)
 set -euo pipefail
 
-if [ -t 1 ]; then C_BOLD="$(tput bold)"; C_RESET="$(tput sgr0)"; C_GREEN="$(tput setaf 2)"; C_YELLOW="$(tput setaf 3)"; C_RED="$(tput setaf 1)"; else C_BOLD=""; C_RESET=""; C_GREEN=""; C_YELLOW=""; C_RED=""; fi
-say()  { printf "%s%s%s\n" "$C_BOLD" "$1" "$C_RESET"; }
-info() { printf "  %s\n" "$1"; }
-ok()   { printf "  %s✓%s %s\n" "$C_GREEN" "$C_RESET" "$1"; }
-warn() { printf "  %s!%s %s\n" "$C_YELLOW" "$C_RESET" "$1"; }
-fail() { printf "  %s✗%s %s\n" "$C_RED" "$C_RESET" "$1" >&2; exit 1; }
-prompt_yn() { local q="$1" def="${2:-y}" ans; if [ "$def" = "y" ]; then read -r -p "  $q [Y/n]: " ans; ans="${ans:-y}"; else read -r -p "  $q [y/N]: " ans; ans="${ans:-n}"; fi; [[ "$ans" =~ ^[Yy] ]]; }
-prompt_default() { read -r -p "  $1 [$2]: " ans; echo "${ans:-$2}"; }
+REPO_NAME="mcp-citation-research"
+ENTRY_POINT="citation-research-mcp"
+REPO_NEEDS_GO="1"
 
-detect_os() {
-    OS_ID="unknown"; OS_LIKE=""; OS_VERSION=""; OS_WSL=0
-    if [ -f /etc/os-release ]; then . /etc/os-release; OS_ID="${ID:-}"; OS_LIKE="${ID_LIKE:-}"; OS_VERSION="${VERSION_ID:-}"; fi
-    [ "$(uname)" = "Darwin" ] && OS_ID="macos"
-    grep -qi microsoft /proc/sys/kernel/osrelease 2>/dev/null && OS_WSL=1 || true
-}
-pkg_install() {
-    case "$OS_ID" in
-        debian|ubuntu) sudo apt-get update -qq && sudo apt-get install -y "$@";;
-        fedora|rhel|centos) sudo dnf install -y "$@";;
-        arch|manjaro) sudo pacman -S --noconfirm "$@";;
-        alpine) sudo apk add --no-cache "$@";;
-        opensuse*|sles) sudo zypper install -y "$@";;
-        macos) brew install "$@";;
-        *) warn "unknown OS — install manually: $*"; return 1;;
-    esac
+# Locate lib/installer-core.sh relative to this script.
+INSTALLER_LIB="$(cd "$(dirname "$0")" && pwd)/lib/installer-core.sh"
+if [ ! -f "$INSTALLER_LIB" ]; then
+  printf '  \033[31m✗\033[0m lib/installer-core.sh not found at %s\n' "$INSTALLER_LIB" >&2
+  exit 1
+fi
+# shellcheck source=lib/installer-core.sh
+. "$INSTALLER_LIB"
+
+# Optional per-repo configuration hook (Phase 5).
+# Called by run_install when not --unattended.
+configure_mcp_citation_research() {
+  # Ask for optional SearXNG URL (the only repo-specific config knob).
+  printf '  SearXNG URL (leave blank for DuckDuckGo-only mode): '
+  read -r SEARXNG_URL </dev/tty || SEARXNG_URL=""
+  if [ -n "$SEARXNG_URL" ]; then
+    printf '  \033[34mℹ\033[0m SearXNG URL recorded: %s\n' "$SEARXNG_URL"
+    export SEARXNG_URL
+  fi
 }
 
-ensure_go() {
-    if command -v go >/dev/null 2>&1; then ok "Go: $(go version | awk '{print $3}')"; return 0; fi
-    if prompt_yn "Install Go via system package manager?"; then
-        case "$OS_ID" in
-            debian|ubuntu|fedora|arch|manjaro|alpine|opensuse*|sles|macos) pkg_install go || pkg_install golang-go || pkg_install golang;;
-            *) fail "install Go 1.22+ manually then re-run";;
-        esac
-    else fail "Go required"; fi
-}
-
-ensure_python() {
-    if command -v python3 >/dev/null 2>&1; then
-        local pyv; pyv="$(python3 -c 'import sys; print("%d.%d"%sys.version_info[:2])')"
-        case "$pyv" in 3.1[0-9]|3.[2-9][0-9]) ok "Python $pyv"; return 0;; esac
-        warn "Python $pyv — needs ≥ 3.10"
-    fi
-    if prompt_yn "Install Python 3.10+ via system package manager?"; then
-        case "$OS_ID" in
-            debian|ubuntu) pkg_install python3 python3-venv python3-pip;;
-            fedora|rhel|centos) pkg_install python3 python3-pip;;
-            arch|manjaro) pkg_install python python-pip;;
-            alpine) pkg_install python3 py3-pip;;
-            macos) pkg_install python@3.12;;
-            *) fail "install Python 3.10+ manually then re-run";;
-        esac
-    else fail "Python 3.10+ required"; fi
-}
-
-main() {
-    say "mcp-citation-research — install wizard (Go daemon + Python frontend)"
-    detect_os
-    info "OS: ${OS_ID}${OS_VERSION:+ $OS_VERSION}$([ "$OS_WSL" = 1 ] && echo ' (WSL2)')"
-
-    say ""; say "Step 1/5: Go toolchain"; ensure_go
-    say ""; say "Step 2/5: Python 3.10+"; ensure_python
-
-    say ""; say "Step 3/5: Install location + search backend"
-    local INSTALL_HOME SEARCH_BACKEND DAEMON_BIN
-    INSTALL_HOME="$(prompt_default "Install root" "$HOME/.local/share/mcp-citation-research")"
-    DAEMON_BIN="$(prompt_default "Daemon binary path" "$HOME/.local/bin/citation-researchd")"
-    say ""
-    say "  Search backends:"
-    info "    [1] DuckDuckGo only       (zero infrastructure, default)"
-    info "    [2] SearXNG + DuckDuckGo  (best — needs a SearXNG host)"
-    SEARCH_BACKEND="$(prompt_default "Choice" "1")"
-    local SEARXNG_URL=""
-    if [ "$SEARCH_BACKEND" = "2" ]; then
-        SEARXNG_URL="$(prompt_default "SearXNG URL" "http://127.0.0.1:8080")"
-    fi
-
-    say ""; say "Step 4/5: Fetch + build"
-    mkdir -p "$INSTALL_HOME" "$(dirname "$DAEMON_BIN")"
-    if [ -d "$INSTALL_HOME/.git" ]; then
-        ( cd "$INSTALL_HOME" && git pull -q )
-    else
-        git clone -q https://github.com/M00C1FER/mcp-citation-research.git "$INSTALL_HOME"
-    fi
-    # CGO_ENABLED=0 yields a fully static binary that runs on any glibc/musl
-    # distro (matters for users running on Alpine or shipping the daemon
-    # via Docker).
-    ( cd "$INSTALL_HOME/daemon" && CGO_ENABLED=0 go build -o "$DAEMON_BIN" ./cmd/citation-researchd )
-    ok "daemon built → $DAEMON_BIN"
-
-    ( cd "$INSTALL_HOME/server" && python3 -m venv .venv && \
-        .venv/bin/pip install --quiet --upgrade pip && \
-        .venv/bin/pip install --quiet -e . )
-    local BIN="${HOME}/.local/bin"; mkdir -p "$BIN"
-    cat > "$BIN/citation-research-mcp" <<EOF
-#!/usr/bin/env bash
-exec "$INSTALL_HOME/server/.venv/bin/citation-research-mcp" "\$@"
-EOF
-    chmod +x "$BIN/citation-research-mcp"
-    ok "MCP frontend installed → $BIN/citation-research-mcp"
-
-    # Pre-shared bearer token: shared between daemon and MCP frontend.
-    # Generated once at install; both halves read CITATION_RESEARCHD_TOKEN at runtime.
-    local CONF_DIR="$INSTALL_HOME/config"
-    local TOKEN_FILE="$CONF_DIR/daemon.token"
-    mkdir -p "$CONF_DIR"
-    if [ ! -s "$TOKEN_FILE" ]; then
-        # 32-byte URL-safe token; openssl is universal, fallback to /dev/urandom.
-        # 32 bytes of entropy in both branches — the openssl/urandom split
-        # was previously inconsistent (24 vs 32) and yielded different
-        # token strengths depending on which binary the host had.
-        if command -v openssl >/dev/null 2>&1; then
-            openssl rand -base64 32 | tr '+/' '-_' | tr -d '=' > "$TOKEN_FILE"
-        else
-            head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=' > "$TOKEN_FILE"
-        fi
-        chmod 600 "$TOKEN_FILE"
-        ok "generated daemon auth token → $TOKEN_FILE"
-    else
-        ok "reusing existing daemon auth token"
-    fi
-
-    # Launcher: boots the daemon with the chosen backend AND the bearer token.
-    cat > "$BIN/citation-researchd-start" <<EOF
-#!/usr/bin/env bash
-# Boots citation-researchd with the install-wizard's chosen search backend.
-# Token sourced from \$CITATION_RESEARCHD_TOKEN (env override) or token file.
-TOKEN="\${CITATION_RESEARCHD_TOKEN:-\$(cat "$TOKEN_FILE" 2>/dev/null || echo '')}"
-export CITATION_RESEARCHD_TOKEN="\$TOKEN"
-exec "$DAEMON_BIN" -addr "${CITATION_RESEARCHD_ADDR:-127.0.0.1:8090}" -searxng "${SEARXNG_URL}" "\$@"
-EOF
-    chmod +x "$BIN/citation-researchd-start"
-
-    # Update MCP-frontend launcher to source the same token so the Python client
-    # sends the matching Authorization header.
-    cat > "$BIN/citation-research-mcp" <<EOF
-#!/usr/bin/env bash
-TOKEN="\${CITATION_RESEARCHD_TOKEN:-\$(cat "$TOKEN_FILE" 2>/dev/null || echo '')}"
-export CITATION_RESEARCHD_TOKEN="\$TOKEN"
-exec "$INSTALL_HOME/server/.venv/bin/citation-research-mcp" "\$@"
-EOF
-    chmod +x "$BIN/citation-research-mcp"
-
-    say ""; say "Step 5/5: Verify"
-    local TEST_TOKEN; TEST_TOKEN="$(cat "$TOKEN_FILE" 2>/dev/null || echo '')"
-    local SMOKE_LOG="$INSTALL_HOME/config/daemon-test.log"
-    if CITATION_RESEARCHD_TOKEN="$TEST_TOKEN" "$DAEMON_BIN" -addr "${CITATION_RESEARCHD_TEST_ADDR:-127.0.0.1:18091}" -searxng "$SEARXNG_URL" >"$SMOKE_LOG" 2>&1 & then
-        local PID=$!; sleep 1
-        # /healthz is exempt from auth; should always succeed
-        if curl -fsS "http://${CITATION_RESEARCHD_TEST_ADDR:-127.0.0.1:18091}/healthz" >/dev/null 2>&1; then ok "daemon healthcheck OK"; else warn "daemon healthcheck failed (see $SMOKE_LOG)"; fi
-        # /search must reject without the token
-        if curl -fsS -X POST "http://${CITATION_RESEARCHD_TEST_ADDR:-127.0.0.1:18091}/search" -d '{}' >/dev/null 2>&1; then
-            warn "auth check failed: /search accepted unauthenticated request"
-        else
-            ok "auth check OK: /search rejects unauthenticated requests"
-        fi
-        kill "$PID" 2>/dev/null || true
-    fi
-    say ""
-    ok "Done. Start the daemon with: citation-researchd-start &"
-    info "Then wire the MCP server into your client (e.g. Claude Desktop config)."
-    info "Token (shared by daemon + MCP frontend): $TOKEN_FILE"
-}
-main "$@"
+run_install "$@"

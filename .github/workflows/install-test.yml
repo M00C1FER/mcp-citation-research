@@ -1,0 +1,85 @@
+name: Installer test
+
+# Thin wrapper that exercises lib/installer-core.sh in unattended mode on
+# multiple OS/arch combinations. It does NOT run the real installer (which
+# would try to download Go, build the daemon, etc.); instead it validates:
+#   1. bash -n (syntax check) on lib/installer-core.sh
+#   2. bats unit tests (tests/test_installer_core.bats)
+#   3. install.sh --help returns 0 and prints "Usage:"
+#
+# End-to-end WSL2 validation is deferred to the actual windows-latest runner
+# per the issue's "Stop conditions" section.
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'lib/installer-core.sh'
+      - 'install.sh'
+      - 'tests/test_installer_core.bats'
+      - '.github/workflows/install-test.yml'
+  pull_request:
+    branches: [main, master]
+    paths:
+      - 'lib/installer-core.sh'
+      - 'install.sh'
+      - 'tests/test_installer_core.bats'
+      - '.github/workflows/install-test.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  installer-core-syntax:
+    name: "bash -n syntax check"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax check installer-core.sh
+        run: bash -n lib/installer-core.sh
+      - name: Syntax check install.sh
+        run: bash -n install.sh
+
+  installer-core-bats:
+    name: "bats unit tests (${{ matrix.os }})"
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install bats
+        run: npm install -g bats
+      - name: Run bats tests
+        run: bats tests/test_installer_core.bats
+
+  installer-help:
+    name: "install.sh --help (${{ matrix.os }})"
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check --help exits 0 and prints Usage
+        run: |
+          output=$(bash install.sh --help 2>&1)
+          echo "$output"
+          echo "$output" | grep -qE 'Usage:|usage:' || \
+            { echo "ERROR: --help output missing Usage line"; exit 1; }
+
+  installer-core-alpine:
+    name: "bats unit tests (alpine)"
+    runs-on: ubuntu-latest
+    container:
+      image: alpine:3.19
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: apk add --no-cache bash nodejs npm git
+      - name: Install bats
+        run: npm install -g bats
+      - name: Syntax check
+        run: bash -n lib/installer-core.sh
+      - name: Run bats tests
+        run: bats tests/test_installer_core.bats
