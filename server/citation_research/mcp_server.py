@@ -47,6 +47,9 @@ if not 0.0 < _HARD_GATE <= 1.0:
         "Must be in (0, 1], e.g. '0.90'."
     )
 
+_env_rerank = os.environ.get("CITATION_RESEARCH_RERANK", "1").strip().lower()
+_ENABLE_RERANK = _env_rerank not in {"0", "false", "no", "off"}
+
 
 def _parse_sources(sources_json: str | None) -> List[Dict[str, Any]]:
     """Safely parse a JSON sources list.
@@ -265,6 +268,8 @@ def research_cite(synthesis: str, sources_json: str,
             (default 3.5). Raise to be more conservative; lower to cite more.
         verify_threshold: BM25 score below which an existing [S#] tag is flagged
             as [UNVERIFIED] (default 1.0).
+            Set CITATION_RESEARCH_RERANK=0 in the server environment to disable
+            cross-encoder reranking and run BM25-only citation selection.
 
     Returns:
         JSON object: {cited_text: str, inserted: int, flagged: int,
@@ -272,7 +277,15 @@ def research_cite(synthesis: str, sources_json: str,
                       coverage_pct: float}
     """
     sources = _parse_sources(sources_json)
-    return json.dumps(bm25_cite(synthesis, sources, insert_threshold, verify_threshold))
+    return json.dumps(
+        bm25_cite(
+            synthesis,
+            sources,
+            insert_threshold,
+            verify_threshold,
+            enable_reranker=_ENABLE_RERANK,
+        )
+    )
 
 
 @mcp.tool()

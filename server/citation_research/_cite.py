@@ -7,7 +7,15 @@ Each paragraph in the synthesis is matched against an index of source content.
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List
+import threading
+from typing import Any, Dict, List, Sequence
+
+_DEFAULT_RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
+_FALLBACK_RERANKER_MODEL = "BAAI/bge-reranker-base"
+_RERANK_TOP_K = 50
+_RERANKER_CACHE: Dict[str, Any] = {}
+_RERANKER_LOCK = threading.Lock()
+_RERANKER_UNAVAILABLE: set[str] = set()
 
 
 def _tokenize(text: str) -> List[str]:
@@ -23,9 +31,76 @@ def _existing_citations(paragraph: str) -> List[int]:
     return [int(m.group(1)) for m in re.finditer(r"\[S(\d+)(?:\s+UNVERIFIED)?\]", paragraph)]
 
 
+def _source_value(source: Any, key: str) -> str:
+    if not isinstance(source, dict):
+        return ""
+    return str(source.get(key, "") or "")
+
+
+def _source_text(source: Any) -> str:
+    title = _source_value(source, "title")
+    content = _source_value(source, "content")
+    return f"{title}\n{content}".strip()
+
+
+def _build_reranker(model: str) -> Any | None:
+    try:
+        from FlagEmbedding import FlagReranker
+    except ImportError:
+        return None
+    try:
+        return FlagReranker(model, use_fp16=True)
+    except Exception:
+        return None
+
+
+def _load_reranker(model: str) -> Any | None:
+    with _RERANKER_LOCK:
+        if model in _RERANKER_CACHE:
+            return _RERANKER_CACHE[model]
+        if model in _RERANKER_UNAVAILABLE:
+            return None
+    reranker = _build_reranker(model)
+    if reranker is None and model != _FALLBACK_RERANKER_MODEL:
+        reranker = _build_reranker(_FALLBACK_RERANKER_MODEL)
+    with _RERANKER_LOCK:
+        if reranker is None:
+            _RERANKER_UNAVAILABLE.add(model)
+            return None
+        _RERANKER_CACHE[model] = reranker
+        return reranker
+
+
+def _score_with_reranker(
+    query: str,
+    sources: Sequence[Dict[str, Any]],
+    candidate_indices: Sequence[int],
+    model: str,
+) -> Dict[int, float]:
+    reranker = _load_reranker(model)
+    if reranker is None or not candidate_indices:
+        return {}
+
+    pairs = [(query, _source_text(sources[idx])) for idx in candidate_indices]
+    try:
+        raw_scores = reranker.compute_score(pairs)
+    except Exception:
+        return {}
+
+    if isinstance(raw_scores, (int, float)):
+        score_values = [float(raw_scores)]
+    else:
+        score_values = [float(score) for score in raw_scores]
+    if len(score_values) != len(candidate_indices):
+        return {}
+    return {idx: score_values[pos] for pos, idx in enumerate(candidate_indices)}
+
+
 def bm25_cite(synthesis: str, sources: List[Dict[str, Any]],
               insert_threshold: float = 3.5,
-              verify_threshold: float = 1.0) -> Dict[str, Any]:
+              verify_threshold: float = 1.0,
+              enable_reranker: bool = True,
+              reranker_model: str = _DEFAULT_RERANKER_MODEL) -> Dict[str, Any]:
     """Inject [S#] tags into synthesis using BM25 scoring against sources.
 
     Args:
@@ -33,6 +108,9 @@ def bm25_cite(synthesis: str, sources: List[Dict[str, Any]],
         sources:   list of {"url", "title", "content"} (1-indexed for [S#])
         insert_threshold: BM25 score needed to auto-insert a citation
         verify_threshold: BM25 score below which existing [S#] is flagged [UNVERIFIED]
+        enable_reranker: when True, rerank BM25 top candidates with a cross-encoder
+        reranker_model: preferred FlagEmbedding model name; falls back to
+            BAAI/bge-reranker-base if unavailable
 
     Returns:
         {"cited_text": str, "inserted": int, "flagged": int,
@@ -52,7 +130,7 @@ def bm25_cite(synthesis: str, sources: List[Dict[str, Any]],
             "coverage_pct": 0.0,
         }
 
-    corpus = [_tokenize(s.get("content", "") + " " + s.get("title", "")) for s in sources]
+    corpus = [_tokenize(_source_text(source)) for source in sources]
     bm25 = BM25Okapi(corpus)
 
     paragraphs = _split_paragraphs(synthesis)
@@ -66,7 +144,17 @@ def bm25_cite(synthesis: str, sources: List[Dict[str, Any]],
             out_paragraphs.append(para)
             continue
         scores = bm25.get_scores(tokens)
+        top_k = min(_RERANK_TOP_K, len(sources))
+        candidate_indices = sorted(
+            range(len(sources)),
+            key=lambda idx: float(scores[idx]),
+            reverse=True,
+        )[:top_k]
         best_idx = int(scores.argmax())
+        if enable_reranker:
+            reranked_scores = _score_with_reranker(para, sources, candidate_indices, reranker_model)
+            if reranked_scores:
+                best_idx = max(candidate_indices, key=lambda idx: reranked_scores.get(idx, float("-inf")))
         best_score = float(scores[best_idx])
 
         existing = _existing_citations(para)
@@ -94,8 +182,8 @@ def bm25_cite(synthesis: str, sources: List[Dict[str, Any]],
     coverage_pct = (cited_paragraphs / len(out_paragraphs) * 100) if out_paragraphs else 0.0
 
     source_list = [
-        {"num": i + 1, "url": s.get("url", ""), "title": s.get("title", "")}
-        for i, s in enumerate(sources)
+        {"num": i + 1, "url": _source_value(source, "url"), "title": _source_value(source, "title")}
+        for i, source in enumerate(sources)
     ]
 
     return {
