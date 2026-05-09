@@ -1,0 +1,17 @@
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    additionalProperties: false
+    properties: {}
+  commandFunction: |-
+    (_config) => ({
+      command: 'citation-research-mcp',
+      args: [],
+      env: {}
+    })
+
+installation:
+  pip:
+    package: git+https://github.com/M00C1FER/mcp-citation-research.git#subdirectory=server
+    command: pip install git+https://github.com/M00C1FER/mcp-citation-research.git#subdirectory=server
