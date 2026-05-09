@@ -17,3 +17,21 @@ dist/
 # Editor
 .idea/
 .vscode/
+# --- Security & secrets (added 2026-05-09 by portfolio standardization) ---
+.env
+.env.*
+*.env.local
+.env.*.local
+.envrc
+credentials.json
+credentials.yaml
+credentials.yml
+secrets.yaml
+secrets.yml
+secrets.json
+*.key
+*.pem
+*.token
+.npmrc
+.netrc
+auth.json
