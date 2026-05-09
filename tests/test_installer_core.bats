@@ -8,6 +8,28 @@ bats_require_minimum_version 1.5.0
 
 CORE="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)/lib/installer-core.sh"
 
+# Shared stub block embedded in flag-parsing subshell tests.
+# Overrides all side-effectful functions so flag parsing can be tested
+# without touching the real system.
+_RUN_INSTALL_STUBS='
+  _wsl_guard()          { return 0; }
+  _termux_guard()       { return 0; }
+  _ensure_bash_alpine() { return 0; }
+  _detect_os()          { OS_ID=ubuntu; OS_LIKE=""; OS_VER=22.04; }
+  _detect_pkg_mgr()     { PKG_MGR=apt; }
+  _need_cmd()           { return 0; }
+  python3()             { case "$*" in *version*) echo "3.12";; *) return 0;; esac; }
+  _install_system_deps(){ return 0; }
+  _ensure_python_venv() { return 0; }
+  _choose_isolation()   { ISOLATION=venv; }
+  _install_go()         { return 0; }
+  _install_self()       { return 0; }
+  _smoke_verify()       { return 0; }
+  _summary()            { return 0; }
+  df()                  { printf "Filesystem 1M-blocks Used Avail Use%% Mounted on\n/dev/sda1 100000 1000 99000 2%% /\n"; }
+  declare()             { return 1; }
+'
+
 # Helper: source installer-core.sh with stub variables into a sub-shell.
 # Avoids polluting the test runner's environment.
 source_core() {
@@ -284,23 +306,7 @@ source_core() {
     ENTRY_POINT=test-cmd
     REPO_NEEDS_GO=0
     . '$CORE'
-    # Stub out all phases so we only get to flag-parse + check the var
-    _wsl_guard()          { return 0; }
-    _termux_guard()       { return 0; }
-    _ensure_bash_alpine() { return 0; }
-    _detect_os()          { OS_ID=ubuntu; OS_LIKE=''; OS_VER=22.04; }
-    _detect_pkg_mgr()     { PKG_MGR=apt; }
-    _need_cmd()           { return 0; }
-    python3()             { case \"\$*\" in *version*) echo '3.12';; *) return 0;; esac; }
-    _install_system_deps(){ return 0; }
-    _ensure_python_venv() { return 0; }
-    _choose_isolation()   { ISOLATION=venv; }
-    _install_go()         { return 0; }
-    _install_self()       { return 0; }
-    _smoke_verify()       { return 0; }
-    _summary()            { return 0; }
-    df()                  { printf 'Filesystem 1M-blocks Used Avail Use%% Mounted on\n/dev/sda1 100000 1000 99000 2%% /\n'; }
-    declare()             { return 1; }
+    eval '$_RUN_INSTALL_STUBS'
     run_install --unattended
     echo \"INSTALLER_UNATTENDED=\$INSTALLER_UNATTENDED\"
   "
@@ -314,22 +320,7 @@ source_core() {
     ENTRY_POINT=test-cmd
     REPO_NEEDS_GO=0
     . '$CORE'
-    _wsl_guard()          { return 0; }
-    _termux_guard()       { return 0; }
-    _ensure_bash_alpine() { return 0; }
-    _detect_os()          { OS_ID=ubuntu; OS_LIKE=''; OS_VER=22.04; }
-    _detect_pkg_mgr()     { PKG_MGR=apt; }
-    _need_cmd()           { return 0; }
-    python3()             { case \"\$*\" in *version*) echo '3.12';; *) return 0;; esac; }
-    _install_system_deps(){ return 0; }
-    _ensure_python_venv() { return 0; }
-    _choose_isolation()   { ISOLATION=venv; }
-    _install_go()         { return 0; }
-    _install_self()       { return 0; }
-    _smoke_verify()       { return 0; }
-    _summary()            { return 0; }
-    df()                  { printf 'Filesystem 1M-blocks Used Avail Use%% Mounted on\n/dev/sda1 100000 1000 99000 2%% /\n'; }
-    declare()             { return 1; }
+    eval '$_RUN_INSTALL_STUBS'
     run_install -y
     echo \"INSTALLER_UNATTENDED=\$INSTALLER_UNATTENDED\"
   "
@@ -343,22 +334,8 @@ source_core() {
     ENTRY_POINT=test-cmd
     REPO_NEEDS_GO=0
     . '$CORE'
-    _wsl_guard()          { return 0; }
-    _termux_guard()       { return 0; }
-    _ensure_bash_alpine() { return 0; }
-    _detect_os()          { OS_ID=ubuntu; OS_LIKE=''; OS_VER=22.04; }
-    _detect_pkg_mgr()     { PKG_MGR=apt; }
-    _need_cmd()           { return 0; }
-    python3()             { case \"\$*\" in *version*) echo '3.12';; *) return 0;; esac; }
-    _install_system_deps(){ return 0; }
-    _ensure_python_venv() { return 0; }
-    _choose_isolation()   { return 0; }
-    _install_go()         { return 0; }
-    _install_self()       { return 0; }
-    _smoke_verify()       { return 0; }
-    _summary()            { return 0; }
-    df()                  { printf 'Filesystem 1M-blocks Used Avail Use%% Mounted on\n/dev/sda1 100000 1000 99000 2%% /\n'; }
-    declare()             { return 1; }
+    eval '$_RUN_INSTALL_STUBS'
+    _choose_isolation() { return 0; }  # skip interactive choice
     run_install --unattended --venv
     echo \"ISOLATION=\$ISOLATION\"
   "
@@ -372,22 +349,8 @@ source_core() {
     ENTRY_POINT=test-cmd
     REPO_NEEDS_GO=0
     . '$CORE'
-    _wsl_guard()          { return 0; }
-    _termux_guard()       { return 0; }
-    _ensure_bash_alpine() { return 0; }
-    _detect_os()          { OS_ID=ubuntu; OS_LIKE=''; OS_VER=22.04; }
-    _detect_pkg_mgr()     { PKG_MGR=apt; }
-    _need_cmd()           { return 0; }
-    python3()             { case \"\$*\" in *version*) echo '3.12';; *) return 0;; esac; }
-    _install_system_deps(){ return 0; }
-    _ensure_python_venv() { return 0; }
-    _choose_isolation()   { return 0; }
-    _install_go()         { return 0; }
-    _install_self()       { return 0; }
-    _smoke_verify()       { return 0; }
-    _summary()            { return 0; }
-    df()                  { printf 'Filesystem 1M-blocks Used Avail Use%% Mounted on\n/dev/sda1 100000 1000 99000 2%% /\n'; }
-    declare()             { return 1; }
+    eval '$_RUN_INSTALL_STUBS'
+    _choose_isolation() { return 0; }  # skip interactive choice
     run_install --unattended --pipx
     echo \"ISOLATION=\$ISOLATION\"
   "
@@ -466,9 +429,9 @@ source_core() {
         /mnt/[a-z]/*) _warn 'Project on Windows filesystem (/mnt/...). Move to ~/ for normal performance.' ;;
       esac
     }
-    cd /mnt/c 2>/dev/null || mkdir -p /tmp/mnt_c_sim && cd /tmp/mnt_c_sim
-    # Call with simulated /mnt path
-    ( cd /tmp && PWD=/mnt/c/Users/test _wsl_guard )
+    cd /mnt/c 2>/dev/null || true
+    # Call with simulated /mnt path (PWD is overridden directly)
+    ( PWD=/mnt/c/Users/test _wsl_guard )
     echo 'guard done'
   "
   rm -f "$fake_wslinterop"
