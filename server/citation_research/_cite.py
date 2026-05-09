@@ -6,8 +6,10 @@ Each paragraph in the synthesis is matched against an index of source content.
 """
 from __future__ import annotations
 
+import logging
 import re
 import threading
+from heapq import nlargest
 from typing import Any, Dict, List, Sequence
 
 _DEFAULT_RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
@@ -16,6 +18,7 @@ _RERANK_TOP_K = 50
 _RERANKER_CACHE: Dict[str, Any] = {}
 _RERANKER_LOCK = threading.Lock()
 _RERANKER_UNAVAILABLE: set[str] = set()
+_LOG = logging.getLogger(__name__)
 
 
 def _tokenize(text: str) -> List[str]:
@@ -47,10 +50,12 @@ def _build_reranker(model: str) -> Any | None:
     try:
         from FlagEmbedding import FlagReranker
     except ImportError:
+        _LOG.warning("FlagEmbedding is not installed; reranking disabled for model %s", model)
         return None
     try:
         return FlagReranker(model, use_fp16=True)
-    except Exception:
+    except Exception as exc:
+        _LOG.warning("Failed to initialize reranker model %s: %s", model, exc)
         return None
 
 
@@ -63,6 +68,11 @@ def _load_reranker(model: str) -> Any | None:
     reranker = _build_reranker(model)
     if reranker is None and model != _FALLBACK_RERANKER_MODEL:
         reranker = _build_reranker(_FALLBACK_RERANKER_MODEL)
+        if reranker is not None:
+            with _RERANKER_LOCK:
+                _RERANKER_CACHE[_FALLBACK_RERANKER_MODEL] = reranker
+                _RERANKER_CACHE[model] = reranker
+            return reranker
     with _RERANKER_LOCK:
         if reranker is None:
             _RERANKER_UNAVAILABLE.add(model)
@@ -84,7 +94,8 @@ def _score_with_reranker(
     pairs = [(query, _source_text(sources[idx])) for idx in candidate_indices]
     try:
         raw_scores = reranker.compute_score(pairs)
-    except Exception:
+    except Exception as exc:
+        _LOG.warning("Reranker scoring failed; falling back to BM25-only ordering: %s", exc)
         return {}
 
     if isinstance(raw_scores, (int, float)):
@@ -144,14 +155,12 @@ def bm25_cite(synthesis: str, sources: List[Dict[str, Any]],
             out_paragraphs.append(para)
             continue
         scores = bm25.get_scores(tokens)
-        top_k = min(_RERANK_TOP_K, len(sources))
-        candidate_indices = sorted(
-            range(len(sources)),
-            key=lambda idx: float(scores[idx]),
-            reverse=True,
-        )[:top_k]
         best_idx = int(scores.argmax())
         if enable_reranker:
+            top_k = min(_RERANK_TOP_K, len(sources))
+            candidate_indices = [
+                idx for idx, _ in nlargest(top_k, enumerate(scores), key=lambda item: float(item[1]))
+            ]
             reranked_scores = _score_with_reranker(para, sources, candidate_indices, reranker_model)
             if reranked_scores:
                 best_idx = max(candidate_indices, key=lambda idx: reranked_scores.get(idx, float("-inf")))

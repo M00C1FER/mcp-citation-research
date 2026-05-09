@@ -268,8 +268,10 @@ def research_cite(synthesis: str, sources_json: str,
             (default 3.5). Raise to be more conservative; lower to cite more.
         verify_threshold: BM25 score below which an existing [S#] tag is flagged
             as [UNVERIFIED] (default 1.0).
-            Set CITATION_RESEARCH_RERANK=0 in the server environment to disable
-            cross-encoder reranking and run BM25-only citation selection.
+
+    Notes:
+        Set CITATION_RESEARCH_RERANK=0 in the server environment to disable
+        cross-encoder reranking and run BM25-only citation selection.
 
     Returns:
         JSON object: {cited_text: str, inserted: int, flagged: int,

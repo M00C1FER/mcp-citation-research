@@ -2,9 +2,22 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 
+import pytest
 from citation_research import _cite
 from citation_research import mcp_server
+
+
+@pytest.fixture(autouse=True)
+def _restore_mcp_server_rerank_setting():
+    original = os.environ.get("CITATION_RESEARCH_RERANK")
+    yield
+    if original is None:
+        os.environ.pop("CITATION_RESEARCH_RERANK", None)
+    else:
+        os.environ["CITATION_RESEARCH_RERANK"] = original
+    importlib.reload(mcp_server)
 
 
 def test_bm25_cite_reranker_changes_ordering(monkeypatch):
@@ -97,6 +110,3 @@ def test_research_cite_rerank_env_opt_out(monkeypatch):
     monkeypatch.setattr(module, "bm25_cite", fake_bm25_cite)
     module.research_cite("hello", json.dumps([]))
     assert captured["enable"] is False
-
-    monkeypatch.delenv("CITATION_RESEARCH_RERANK", raising=False)
-    importlib.reload(mcp_server)
