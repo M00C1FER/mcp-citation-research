@@ -1,0 +1,62 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: build-and-publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+
+      - name: Build cross-compiled daemon binaries
+        working-directory: daemon
+        run: |
+          set -euo pipefail
+          mkdir -p ../dist
+
+          targets=(
+            "linux amd64"
+            "linux arm64"
+            "darwin amd64"
+            "darwin arm64"
+            "windows amd64"
+          )
+
+          for target in "${targets[@]}"; do
+            set -- $target
+            goos="$1"
+            goarch="$2"
+            ext=""
+            if [ "$goos" = "windows" ]; then
+              ext=".exe"
+            fi
+            out="../dist/citation-researchd_${goos}_${goarch}${ext}"
+            echo "Building ${out}"
+            CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build -trimpath -o "$out" ./cmd/citation-researchd
+          done
+
+      - name: Generate SHA256SUMS
+        working-directory: dist
+        run: sha256sum * > SHA256SUMS
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/citation-researchd_linux_amd64
+            dist/citation-researchd_linux_arm64
+            dist/citation-researchd_darwin_amd64
+            dist/citation-researchd_darwin_arm64
+            dist/citation-researchd_windows_amd64.exe
+            dist/SHA256SUMS

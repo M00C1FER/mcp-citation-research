@@ -9,6 +9,14 @@
 ![Python](https://img.shields.io/badge/python-3.10+-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
+## Install
+
+```bash
+go install github.com/M00C1FER/mcp-citation-research/daemon/cmd/citation-researchd@latest
+```
+
+Canonical path above installs the daemon binary. The Python MCP frontend is currently installed from source (`cd server && pip install -e .`) until a dedicated published frontend package path is added.
+
 ## What's actually unique here
 
 After a survey of 70+ MCP servers in the [official registry](https://registry.modelcontextprotocol.io) and adjacent ecosystems (Smithery, Glama, awesome-mcp-servers @ 85k★), the differentiators are:
