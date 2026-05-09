@@ -77,13 +77,12 @@ source_core() {
   # wrapper that overrides grep to always succeed for the microsoft pattern.
   run bash -c "
     . '$CORE'
-    # Override grep to simulate WSL detection
+    # Override grep to simulate WSL detection by matching the microsoft check
     grep() {
-      if [ \"\$2\" = '/proc/sys/kernel/osrelease' ] 2>/dev/null || \
-         [ \"\${*}\" = \"-qi microsoft /proc/sys/kernel/osrelease\" ]; then
-        return 0
-      fi
-      command grep \"\$@\"
+      case \"\$*\" in
+        *microsoft*/proc/sys/kernel/osrelease) return 0 ;;
+        *) command grep \"\$@\" ;;
+      esac
     }
     if _is_wsl; then echo 'wsl'; else echo 'not-wsl'; fi
   "
@@ -292,7 +291,7 @@ source_core() {
     _detect_os()          { OS_ID=ubuntu; OS_LIKE=''; OS_VER=22.04; }
     _detect_pkg_mgr()     { PKG_MGR=apt; }
     _need_cmd()           { return 0; }
-    python3()             { case \"\$*\" in *version*) echo '3.12';; *3,10*) return 0;; *) return 0;; esac; }
+    python3()             { case \"\$*\" in *version*) echo '3.12';; *) return 0;; esac; }
     _install_system_deps(){ return 0; }
     _ensure_python_venv() { return 0; }
     _choose_isolation()   { ISOLATION=venv; }
@@ -321,7 +320,7 @@ source_core() {
     _detect_os()          { OS_ID=ubuntu; OS_LIKE=''; OS_VER=22.04; }
     _detect_pkg_mgr()     { PKG_MGR=apt; }
     _need_cmd()           { return 0; }
-    python3()             { case \"\$*\" in *version*) echo '3.12';; *3,10*) return 0;; *) return 0;; esac; }
+    python3()             { case \"\$*\" in *version*) echo '3.12';; *) return 0;; esac; }
     _install_system_deps(){ return 0; }
     _ensure_python_venv() { return 0; }
     _choose_isolation()   { ISOLATION=venv; }
@@ -350,7 +349,7 @@ source_core() {
     _detect_os()          { OS_ID=ubuntu; OS_LIKE=''; OS_VER=22.04; }
     _detect_pkg_mgr()     { PKG_MGR=apt; }
     _need_cmd()           { return 0; }
-    python3()             { case \"\$*\" in *version*) echo '3.12';; *3,10*) return 0;; *) return 0;; esac; }
+    python3()             { case \"\$*\" in *version*) echo '3.12';; *) return 0;; esac; }
     _install_system_deps(){ return 0; }
     _ensure_python_venv() { return 0; }
     _choose_isolation()   { return 0; }
@@ -379,7 +378,7 @@ source_core() {
     _detect_os()          { OS_ID=ubuntu; OS_LIKE=''; OS_VER=22.04; }
     _detect_pkg_mgr()     { PKG_MGR=apt; }
     _need_cmd()           { return 0; }
-    python3()             { case \"\$*\" in *version*) echo '3.12';; *3,10*) return 0;; *) return 0;; esac; }
+    python3()             { case \"\$*\" in *version*) echo '3.12';; *) return 0;; esac; }
     _install_system_deps(){ return 0; }
     _ensure_python_venv() { return 0; }
     _choose_isolation()   { return 0; }
@@ -402,7 +401,7 @@ source_core() {
     ENTRY_POINT=test-cmd
     . '$CORE'
     run_install --help
-  " 2>&1 || true
+  "
   # Should fail because REPO_NAME is required (exit code non-zero)
   [ "$status" -ne 0 ]
 }

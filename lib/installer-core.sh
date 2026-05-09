@@ -168,7 +168,7 @@ _ensure_python_venv() {
   if ! python3 -m venv --help >/dev/null 2>&1; then
     case "$PKG_MGR" in
       apt)
-        PY_VER=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+        PY_VER=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')
         $SUDO apt-get install -y "python${PY_VER}-venv" python3-venv
         ;;
       apk)
