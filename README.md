@@ -15,7 +15,7 @@
 go install github.com/M00C1FER/mcp-citation-research/daemon/cmd/citation-researchd@latest
 ```
 
-Canonical path above installs the daemon binary. The Python MCP frontend is currently installed from source (`cd server && pip install -e .`) until a dedicated published frontend package path is added.
+Canonical path above installs the daemon binary. Install the Python MCP frontend from repo root with `pip install -e .`.
 
 ## What's actually unique here
 
@@ -66,7 +66,6 @@ go build -o ./citation-researchd ./cmd/citation-researchd
 
 ### Install the MCP server
 ```bash
-cd server
 pip install -e .
 ```
 

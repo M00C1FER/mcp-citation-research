@@ -6,8 +6,8 @@
   "repository": "https://github.com/M00C1FER/mcp-citation-research",
   "installation": {
     "pip": {
-      "package": "git+https://github.com/M00C1FER/mcp-citation-research.git#subdirectory=server",
-      "command": "pip install git+https://github.com/M00C1FER/mcp-citation-research.git#subdirectory=server"
+      "package": "git+https://github.com/M00C1FER/mcp-citation-research.git",
+      "command": "pip install git+https://github.com/M00C1FER/mcp-citation-research.git"
     }
   },
   "tools": [
