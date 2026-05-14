@@ -105,6 +105,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Cache Hugging Face models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: ${{ runner.os }}-hf-${{ matrix.python-version }}-${{ hashFiles('server/pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-hf-${{ matrix.python-version }}-
       - name: Install
         working-directory: server
         run: |
@@ -124,6 +131,13 @@ jobs:
       image: python:3.12-alpine
     steps:
       - uses: actions/checkout@v4
+      - name: Cache Hugging Face models
+        uses: actions/cache@v4
+        with:
+          path: /root/.cache/huggingface
+          key: alpine-hf-${{ hashFiles('server/pyproject.toml') }}
+          restore-keys: |
+            alpine-hf-
       - name: Install build tools
         run: apk add --no-cache gcc musl-dev libffi-dev git
       - name: Install
