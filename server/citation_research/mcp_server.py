@@ -25,7 +25,7 @@ try:
 except ImportError as e:  # pragma: no cover
     raise SystemExit("fastmcp not installed. Run: pip install citation-research[mcp]") from e
 
-from . import DaemonClient, bm25_cite, verify_synthesis
+from . import DaemonClient, MCTSQueryNode, MCTSQuerySelector, QuerySelectionConfig, bm25_cite, verify_synthesis
 
 
 mcp = FastMCP("citation-research")
@@ -180,8 +180,21 @@ def research_fetch(urls: List[str], max_concurrent: int = 16, timeout_s: int = 3
     return json.dumps(_client.fetch(urls, max_concurrent, timeout_s))
 
 
+def _candidate_queries(topic: str) -> List[str]:
+    return [
+        f"What is {topic}?",
+        f"Why does {topic} matter? Who is affected?",
+        f"Current state-of-the-art for {topic}",
+        f"Best alternatives to {topic}",
+        f"Common pitfalls / failure modes of {topic}",
+        f"Key open questions about {topic}",
+        f"Recent developments in {topic} (last 12 months)",
+        f"Verifiable claims and counter-claims about {topic}",
+    ]
+
+
 @mcp.tool()
-def research_decompose(topic: str, breadth: int = 8) -> str:
+def research_decompose(topic: str, breadth: int = 8, use_mcts: bool = True) -> str:
     """Generate heuristic sub-questions to guide multi-angle research.
 
     Produces a fixed set of aspect-covering sub-questions for the topic. This
@@ -192,23 +205,32 @@ def research_decompose(topic: str, breadth: int = 8) -> str:
     Args:
         topic: The research topic to decompose.
         breadth: Number of sub-questions to return (1–8, default 8).
+        use_mcts: When True (default), rank candidate follow-up queries with
+            UCB1 + CRAAP-style exploitation. Set False to return the original
+            heuristic order unchanged.
 
     Returns:
         JSON object: {sub_questions: [str], rationale: str}
     """
-    aspects = [
-        f"What is {topic}?",
-        f"Why does {topic} matter? Who is affected?",
-        f"Current state-of-the-art for {topic}",
-        f"Best alternatives to {topic}",
-        f"Common pitfalls / failure modes of {topic}",
-        f"Key open questions about {topic}",
-        f"Recent developments in {topic} (last 12 months)",
-        f"Verifiable claims and counter-claims about {topic}",
-    ]
+    aspects = _candidate_queries(topic)
+    if use_mcts:
+        config = QuerySelectionConfig(use_mcts=use_mcts, top_k=breadth)
+        selector = MCTSQuerySelector(config)
+        root = MCTSQueryNode(query=topic, visits=1)
+        sub_questions = selector.select_next_queries(root, aspects, top_k=breadth)
+        rationale = (
+            "Heuristic decomposition ranked with MCTS UCB1 + CRAAP-style exploitation. "
+            "CLI can still override with LLM-grade decomposition for production work."
+        )
+    else:
+        sub_questions = aspects[:breadth]
+        rationale = (
+            "Heuristic decomposition without MCTS ranking. "
+            "CLI should override with LLM-grade decomposition for production work."
+        )
     return json.dumps({
-        "sub_questions": aspects[:breadth],
-        "rationale": "Heuristic decomposition. CLI should override with LLM-grade decomposition for production work.",
+        "sub_questions": sub_questions,
+        "rationale": rationale,
     })
 
 

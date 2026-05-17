@@ -107,6 +107,11 @@ pip install -e .
 | `pinecone-mcp` | ❌ | ❌ | ❌ | Python |
 | **`mcp-citation-research`** | **✅ 0.90** | **✅ sentence-chunked** | **✅ 4-axis hard gate** | **Go daemon + Python frontend** |
 
+## Benchmarks
+
+Run `python benchmarks/mandate_vs_no_mandate.py "your query"` to compare
+mandate-enforced vs. single-pass synthesis quality on the same question.
+
 ## Testing
 
 ```bash
